@@ -1,0 +1,40 @@
+{
+  "name": "laelia",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "start": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "icons": "node scripts/generate-icons.mjs"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwind-merge": "^3.4.0",
+    "tone": "^15.1.22"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "^25.2.1",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.3",
+    "eslint": "^9.39.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^17.3.0",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.54.0",
+    "vite": "^7.3.1",
+    "@resvg/resvg-js": "^2.6.2",
+    "vite-plugin-pwa": "^1.2.0"
+  }
+}

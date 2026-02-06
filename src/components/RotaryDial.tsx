@@ -1,0 +1,102 @@
+import { useCallback, useRef, useState, useEffect } from 'react';
+import { cn } from '@/lib/utils';
+
+interface RotaryDialProps {
+  label: string;
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  onChange: (value: number) => void;
+  displayValue?: string;
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
+}
+
+export function RotaryDial({
+  label,
+  value,
+  min = 0,
+  max = 1,
+  step = 0.01,
+  onChange,
+  displayValue,
+  size = 'md',
+  className,
+}: RotaryDialProps) {
+  const dialRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const startY = useRef(0);
+  const startValue = useRef(0);
+
+  const sizeClasses = { sm: 'w-12 h-12', md: 'w-16 h-16', lg: 'w-20 h-20' };
+  const indicatorSizes = { sm: 'w-1 h-2', md: 'w-1.5 h-3', lg: 'w-2 h-4' };
+  const normalizedValue = (value - min) / (max - min);
+  const rotation = -135 + normalizedValue * 270;
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    startY.current = e.clientY;
+    startValue.current = value;
+  }, [value]);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    setIsDragging(true);
+    startY.current = e.touches[0].clientY;
+    startValue.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+      const deltaY = startY.current - e.clientY;
+      const sensitivity = (max - min) / 150;
+      let newValue = Math.max(min, Math.min(max, startValue.current + deltaY * sensitivity));
+      newValue = Math.round(newValue / step) * step;
+      onChange(newValue);
+    };
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!isDragging) return;
+      const deltaY = startY.current - e.touches[0].clientY;
+      const sensitivity = (max - min) / 150;
+      let newValue = Math.max(min, Math.min(max, startValue.current + deltaY * sensitivity));
+      newValue = Math.round(newValue / step) * step;
+      onChange(newValue);
+    };
+    const handleMouseUp = () => setIsDragging(false);
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('touchmove', handleTouchMove);
+      window.addEventListener('touchend', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleMouseUp);
+    };
+  }, [isDragging, min, max, step, onChange]);
+
+  return (
+    <div className={cn('flex flex-col items-center gap-2', className)}>
+      <div
+        ref={dialRef}
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        className={cn('synth-dial flex items-center justify-center', sizeClasses[size], isDragging && 'ring-2 ring-primary/50')}
+        style={{ touchAction: 'none' }}
+      >
+        <div className="relative w-full h-full flex items-center justify-center" style={{ transform: `rotate(${rotation}deg)` }}>
+          <div className={cn('synth-dial-indicator absolute top-1', indicatorSizes[size])} />
+        </div>
+      </div>
+      <div className="text-center">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</div>
+        {displayValue && <div className="text-xs font-mono text-foreground mt-0.5">{displayValue}</div>}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,163 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+/* Theme: semantic colors and tokens (Tailwind v4 @theme) */
+@theme {
+  --color-background: hsl(220 20% 8%);
+  --color-foreground: hsl(210 20% 95%);
+  --color-card: hsl(220 18% 12%);
+  --color-card-foreground: hsl(210 20% 95%);
+  --color-popover: hsl(220 18% 10%);
+  --color-popover-foreground: hsl(210 20% 95%);
+  --color-primary: hsl(45 100% 55%);
+  --color-primary-foreground: hsl(220 20% 8%);
+  --color-secondary: hsl(220 15% 18%);
+  --color-secondary-foreground: hsl(210 20% 90%);
+  --color-muted: hsl(220 15% 15%);
+  --color-muted-foreground: hsl(210 10% 55%);
+  --color-accent: hsl(180 60% 50%);
+  --color-accent-foreground: hsl(220 20% 8%);
+  --color-destructive: hsl(0 70% 50%);
+  --color-destructive-foreground: hsl(210 20% 95%);
+  --color-border: hsl(220 15% 20%);
+  --color-input: hsl(220 15% 18%);
+  --color-ring: hsl(45 100% 55%);
+  --radius: 0.75rem;
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-display: 'JetBrains Mono', monospace;
+  --animate-pulse-glow: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+:root {
+  --background: 220 20% 8%;
+  --foreground: 210 20% 95%;
+  --synth-surface: 220 18% 14%;
+  --synth-surface-elevated: 220 16% 18%;
+  --synth-glow: 45 100% 55%;
+  --synth-glow-accent: 180 70% 50%;
+  --synth-key-white: 210 20% 92%;
+  --synth-key-black: 220 20% 12%;
+  --synth-key-pressed: 45 100% 60%;
+  --synth-dial: 220 15% 22%;
+  --synth-dial-indicator: 45 100% 55%;
+  --synth-display: 220 25% 6%;
+  --synth-display-text: 120 80% 55%;
+  --border: 220 15% 20%;
+  --radius: 0.75rem;
+}
+
+.dark {
+  --background: 220 20% 8%;
+  --foreground: 210 20% 95%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html, body, #root {
+    @apply h-full overflow-hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .selectable-text {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .synth-panel {
+    @apply bg-card rounded-2xl border border-border shadow-2xl;
+    background: linear-gradient(145deg, hsl(var(--synth-surface)) 0%, hsl(var(--synth-surface-elevated)) 100%);
+  }
+
+  .synth-dial {
+    @apply relative rounded-full cursor-pointer select-none;
+    background: linear-gradient(145deg, hsl(var(--synth-dial)) 0%, hsl(220 15% 16%) 100%);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.3), 0 4px 8px rgba(0,0,0,0.4), 0 0 0 2px hsl(var(--border));
+  }
+
+  .synth-dial-indicator {
+    @apply absolute bg-primary rounded-full;
+    box-shadow: 0 0 8px hsl(var(--synth-glow) / 0.6);
+  }
+
+  .synth-button {
+    @apply relative rounded-lg font-mono text-sm font-medium transition-all duration-150 bg-secondary border border-border text-secondary-foreground active:scale-95;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+
+  .synth-button:hover {
+    background: hsl(45 100% 55% / 0.15);
+    border-color: hsl(45 100% 55% / 0.3);
+  }
+
+  .synth-key-white {
+    @apply rounded-b-lg transition-all duration-75;
+    background: linear-gradient(180deg, hsl(var(--synth-key-white)) 0%, hsl(210 15% 85%) 100%);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3), inset 0 -2px 4px rgba(0,0,0,0.1);
+  }
+
+  .synth-key-white:active,
+  .synth-key-white.pressed {
+    background: linear-gradient(180deg, hsl(var(--synth-key-pressed)) 0%, hsl(45 90% 50%) 100%);
+    box-shadow: 0 0 16px hsl(var(--synth-glow) / 0.5), 0 2px 4px rgba(0,0,0,0.3);
+    transform: translateY(2px);
+  }
+
+  .synth-key-black {
+    @apply rounded-b-md transition-all duration-75;
+    background: linear-gradient(180deg, hsl(220 20% 18%) 0%, hsl(var(--synth-key-black)) 100%);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+  }
+
+  .synth-key-black:active,
+  .synth-key-black.pressed {
+    background: linear-gradient(180deg, hsl(45 80% 45%) 0%, hsl(45 90% 35%) 100%);
+    box-shadow: 0 0 12px hsl(var(--synth-glow) / 0.4), 0 2px 3px rgba(0,0,0,0.4);
+    transform: translateY(1px);
+  }
+
+  .synth-display {
+    @apply rounded-lg font-mono;
+    background: hsl(var(--synth-display));
+    box-shadow: inset 0 2px 8px rgba(0,0,0,0.5), 0 0 0 1px hsl(var(--border));
+  }
+
+  .synth-display-text {
+    color: hsl(var(--synth-display-text));
+    text-shadow: 0 0 8px hsl(var(--synth-display-text) / 0.5);
+  }
+
+  .glow-primary {
+    box-shadow: 0 0 20px hsl(var(--synth-glow) / 0.3);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px hsl(var(--synth-glow-accent) / 0.3);
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}

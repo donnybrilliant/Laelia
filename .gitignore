@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dev-dist/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Env and IDE
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
