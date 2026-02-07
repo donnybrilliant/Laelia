@@ -299,7 +299,8 @@ class AudioEngine {
 
   getActiveNotes(): Array<{ note: string; mode: PerformanceMode }> {
     if (!this.synth) return [];
-    const voices = (this.synth as Tone.PolySynth & { _voices?: Tone.Synth[] })._voices;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const voices = (this.synth as any)._voices as Tone.Synth[] | undefined;
     if (!voices) {
       return this.currentChordNotes.map(note => ({
         note,
@@ -308,7 +309,7 @@ class AudioEngine {
     }
     const activeNotes: Array<{ note: string; mode: PerformanceMode }> = [];
     const seenNotes = new Set<string>();
-    voices.forEach((voice) => {
+    voices.forEach((voice: Tone.Synth) => {
       const env = voice.envelope;
       if (env && env.value > 0.01) {
         const note = Tone.Frequency(voice.frequency.value).toNote();

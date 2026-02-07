@@ -21,9 +21,6 @@ const KEY_CODE_MAP: Record<string, number> = {
   KeyZ: 0, KeyS: 1, KeyX: 2, KeyD: 3, KeyC: 4, KeyV: 5, KeyG: 6, KeyB: 7, KeyH: 8, KeyN: 9, KeyJ: 10, KeyM: 11, Comma: 12,
 };
 
-// All keys for hit detection
-const ALL_KEYS = [...WHITE_KEYS, ...BLACK_KEY_DATA.map(k => k.note)];
-
 export function Keyboard({ onNoteOn, onNoteOff, activeNotes }: KeyboardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activePointersRef = useRef<Map<number, number>>(new Map()); // pointerId -> note
@@ -163,9 +160,11 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes }: KeyboardProps) {
 
   // Cleanup on unmount
   useEffect(() => {
+    const activePointers = activePointersRef.current;
+    const keyboardKeys = keyboardKeysRef.current;
     return () => {
-      activePointersRef.current.clear();
-      keyboardKeysRef.current.clear();
+      activePointers.clear();
+      keyboardKeys.clear();
     };
   }, []);
 
