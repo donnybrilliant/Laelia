@@ -23,8 +23,8 @@ export function LaeliaSynth() {
     Array<{ note: string; mode: PerformanceMode }>
   >([]);
   const pollRef = useRef<number | null>(null);
-  /** Track notes that are initializing (between handleNoteOn start and playNote call) */
-  const pendingNotesRef = useRef<Set<number>>(new Set());
+  /** Track whether we've started initializing audio (to avoid multiple init calls) */
+  const initStartedRef = useRef(false);
 
   const [volume, setVolume] = useState(0.7);
   const [sound, setSound] = useState(0);
@@ -53,6 +53,25 @@ export function LaeliaSynth() {
     }
     return true;
   }, [isReady, unlockAudio]);
+
+  // Eagerly initialize audio on first user interaction with the page
+  // This ensures audio is ready before keyboard keys are pressed
+  useEffect(() => {
+    const initOnInteraction = () => {
+      if (initStartedRef.current) return;
+      initStartedRef.current = true;
+      ensureAudio();
+      // Remove listeners once init has started
+      document.removeEventListener("pointerdown", initOnInteraction);
+      document.removeEventListener("keydown", initOnInteraction);
+    };
+    document.addEventListener("pointerdown", initOnInteraction, { once: true });
+    document.addEventListener("keydown", initOnInteraction, { once: true });
+    return () => {
+      document.removeEventListener("pointerdown", initOnInteraction);
+      document.removeEventListener("keydown", initOnInteraction);
+    };
+  }, [ensureAudio]);
 
   const toggleExtension = (ext: "6" | "m7" | "M7" | "9") => {
     setExtensions((prev) => {
@@ -129,26 +148,24 @@ export function LaeliaSynth() {
   );
 
   const handleNoteOn = useCallback(
-    async (note: number) => {
-      pendingNotesRef.current.add(note);
-      unlockAudio();
-      await ensureAudio();
-      if (!pendingNotesRef.current.has(note)) {
-        return;
+    (note: number) => {
+      // Start init if not already (in case user somehow bypassed the document listener)
+      if (!initStartedRef.current) {
+        initStartedRef.current = true;
+        ensureAudio();
       }
-      pendingNotesRef.current.delete(note);
+      // Only play if audio engine is ready - this avoids race conditions
+      // If not ready yet, we simply don't play (user can press again once ready)
+      if (!isReady) return;
+      
       const chordName = audioEngine.playNote(note);
       setCurrentChord(chordName);
       setPressedKeys((prev) => new Set(prev).add(note));
     },
-    [ensureAudio, unlockAudio],
+    [ensureAudio, isReady],
   );
 
   const handleNoteOff = useCallback((note: number) => {
-    if (pendingNotesRef.current.has(note)) {
-      pendingNotesRef.current.delete(note);
-      return;
-    }
     audioEngine.releaseNote(note);
     setPressedKeys((prev) => {
       const next = new Set(prev);
