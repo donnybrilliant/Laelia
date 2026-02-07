@@ -13,7 +13,8 @@ export function Display({ chord, keyName, bpm, sound, mode, className }: Display
   return (
     <div className={cn('synth-display p-4 w-full', className)}>
       <div className="flex flex-col items-center gap-2">
-        <div className="synth-display-text text-3xl sm:text-4xl font-display font-bold tracking-wide min-h-[40px]">
+        {/* Fixed min-width to prevent layout shift - longest chord is like "D#sus4maj796" */}
+        <div className="synth-display-text text-3xl sm:text-4xl font-display font-bold tracking-wide min-h-[40px] min-w-[180px] text-center">
           {chord || '—'}
         </div>
         <div className="flex items-center justify-center gap-4 text-xs font-mono">

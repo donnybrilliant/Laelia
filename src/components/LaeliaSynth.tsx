@@ -11,11 +11,14 @@ import { Keyboard } from "./Keyboard";
 import { Display } from "./Display";
 import { ModeButton } from "./ModeButton";
 import { Visualizer } from "./Visualizer";
+import { LandscapeLayout } from "./LandscapeLayout";
+import { useLandscapeMobile } from "@/hooks/use-landscape-mobile";
 
 export function LaeliaSynth() {
+  const isLandscapeMobile = useLandscapeMobile();
   const [isReady, setIsReady] = useState(false);
   const [currentChord, setCurrentChord] = useState("");
-  const [activeNote, setActiveNote] = useState(-1);
+  const [pressedKeys, setPressedKeys] = useState<Set<number>>(new Set()); // Keyboard keys currently pressed
   const [activeNotes, setActiveNotes] = useState<
     Array<{ note: string; mode: PerformanceMode }>
   >([]);
@@ -129,20 +132,64 @@ export function LaeliaSynth() {
       await ensureAudio();
       const chordName = audioEngine.playNote(note);
       setCurrentChord(chordName);
-      setActiveNote(note);
+      setPressedKeys((prev) => new Set(prev).add(note));
     },
     [ensureAudio, unlockAudio],
   );
 
-  const handleNoteOff = useCallback(() => {
-    audioEngine.releaseNote();
-    setActiveNote(-1);
-    setCurrentChord("");
+  const handleNoteOff = useCallback((note: number) => {
+    setPressedKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(note);
+      // Only release audio if no more keys are pressed
+      if (next.size === 0) {
+        audioEngine.releaseNote();
+        setCurrentChord("");
+      }
+      return next;
+    });
   }, []);
 
   const handleRemoveActiveNote = useCallback((note: string) => {
     audioEngine.releaseSpecificNote(note);
   }, []);
+
+  // Landscape mobile layout - optimized for horizontal phone orientation
+  if (isLandscapeMobile) {
+    return (
+      <LandscapeLayout
+        isReady={isReady}
+        currentChord={currentChord}
+        pressedKeys={pressedKeys}
+        activeNotes={activeNotes}
+        handleRemoveActiveNote={handleRemoveActiveNote}
+        volume={volume}
+        setVolume={setVolume}
+        sound={sound}
+        setSound={setSound}
+        fx={fx}
+        setFx={setFx}
+        keyValue={key}
+        setKey={setKey}
+        bpm={bpm}
+        setBpm={setBpm}
+        chordVoicing={chordVoicing}
+        setChordVoicing={setChordVoicing}
+        bassVoicing={bassVoicing}
+        setBassVoicing={setBassVoicing}
+        performanceMode={performanceMode}
+        setPerformanceMode={setPerformanceMode}
+        chordType={chordType}
+        setChordType={setChordType}
+        extensions={extensions}
+        toggleExtension={toggleExtension}
+        ensureAudio={ensureAudio}
+        handleNoteOn={handleNoteOn}
+        handleNoteOff={handleNoteOff}
+        getPresetName={() => audioEngine.getPresetName()}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen w-screen flex items-center justify-center p-2 sm:p-4 overflow-auto">
@@ -181,7 +228,7 @@ export function LaeliaSynth() {
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="relative">
+          <div className="relative min-h-[100px]">
             <Display
               chord={currentChord}
               keyName={NOTE_NAMES[key]}
@@ -190,7 +237,11 @@ export function LaeliaSynth() {
               mode={performanceMode}
             />
             <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-lg opacity-60">
-              <Visualizer isActive={isReady} />
+              <Visualizer 
+                isActive={isReady} 
+                hasActiveNotes={activeNotes.length > 0}
+                performanceMode={performanceMode}
+              />
             </div>
           </div>
 
@@ -370,7 +421,7 @@ export function LaeliaSynth() {
                 <Keyboard
                   onNoteOn={handleNoteOn}
                   onNoteOff={handleNoteOff}
-                  activeNote={activeNote}
+                  activeNotes={pressedKeys}
                 />
               </div>
             </div>

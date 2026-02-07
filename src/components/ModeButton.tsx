@@ -1,12 +1,14 @@
 import { cn } from '@/lib/utils';
 
 type ColorVariant = 'primary' | 'cyan' | 'amber' | 'fuchsia' | 'emerald';
+type ButtonSize = 'xs' | 'sm' | 'md';
 
-interface ModeButtonProps {
+export interface ModeButtonProps {
   label: string;
   isActive: boolean;
   onClick: () => void;
   colorVariant?: ColorVariant;
+  size?: ButtonSize;
   className?: string;
 }
 
@@ -18,18 +20,25 @@ const activeColorClasses: Record<ColorVariant, string> = {
   emerald: 'bg-emerald-500 text-emerald-950 shadow-[0_0_16px_rgba(16,185,129,0.5)]',
 };
 
-export function ModeButton({ label, isActive, onClick, colorVariant = 'primary', className }: ModeButtonProps) {
+const sizeClasses: Record<ButtonSize, string> = {
+  xs: 'px-1.5 py-1 min-w-[28px] text-[10px]',
+  sm: 'px-2 py-1.5 min-w-[40px] text-xs',
+  md: 'px-3 py-2 min-w-[48px] text-sm',
+};
+
+export function ModeButton({ label, isActive, onClick, colorVariant = 'primary', size = 'md', className }: ModeButtonProps) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        'synth-button px-2 py-1.5 text-xs uppercase tracking-wider select-none',
+        'synth-button uppercase tracking-wider select-none',
         'flex items-center justify-center',
+        sizeClasses[size],
         isActive && activeColorClasses[colorVariant],
         className
       )}
     >
-      <span className="font-mono font-medium">{label}</span>
+      <span className="font-mono font-semibold">{label}</span>
     </button>
   );
 }

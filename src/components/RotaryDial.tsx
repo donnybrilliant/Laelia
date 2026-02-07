@@ -9,7 +9,7 @@ interface RotaryDialProps {
   step?: number;
   onChange: (value: number) => void;
   displayValue?: string;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   className?: string;
 }
 
@@ -29,8 +29,8 @@ export function RotaryDial({
   const startY = useRef(0);
   const startValue = useRef(0);
 
-  const sizeClasses = { sm: 'w-12 h-12', md: 'w-16 h-16', lg: 'w-20 h-20' };
-  const indicatorSizes = { sm: 'w-1 h-2', md: 'w-1.5 h-3', lg: 'w-2 h-4' };
+  const sizeClasses = { xs: 'w-8 h-8', sm: 'w-12 h-12', md: 'w-16 h-16', lg: 'w-20 h-20' };
+  const indicatorSizes = { xs: 'w-0.5 h-1.5', sm: 'w-1 h-2', md: 'w-1.5 h-3', lg: 'w-2 h-4' };
   const normalizedValue = (value - min) / (max - min);
   const rotation = -135 + normalizedValue * 270;
 
@@ -94,8 +94,20 @@ export function RotaryDial({
         </div>
       </div>
       <div className="text-center">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</div>
-        {displayValue && <div className="text-xs font-mono text-foreground mt-0.5">{displayValue}</div>}
+        <div className={cn(
+          'uppercase tracking-wider text-muted-foreground font-medium',
+          size === 'xs' ? 'text-[8px]' : 'text-[10px]'
+        )}>
+          {label}
+        </div>
+        {displayValue && (
+          <div className={cn(
+            'font-mono text-foreground mt-0.5',
+            size === 'xs' ? 'text-[9px]' : 'text-xs'
+          )}>
+            {displayValue}
+          </div>
+        )}
       </div>
     </div>
   );
