@@ -138,14 +138,11 @@ export function LaeliaSynth() {
   );
 
   const handleNoteOff = useCallback((note: number) => {
+    audioEngine.releaseNote(note);
     setPressedKeys((prev) => {
       const next = new Set(prev);
       next.delete(note);
-      // Only release audio if no more keys are pressed
-      if (next.size === 0) {
-        audioEngine.releaseNote();
-        setCurrentChord("");
-      }
+      if (next.size === 0) setCurrentChord("");
       return next;
     });
   }, []);

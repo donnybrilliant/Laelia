@@ -46,7 +46,7 @@ export interface SynthState {
 
 class AudioEngine {
   private synth: Tone.PolySynth | null = null;
-  private bassSynth: Tone.Synth | null = null;
+  private bassSynth: Tone.PolySynth | null = null;
   private reverb: Tone.Reverb | null = null;
   private delay: Tone.FeedbackDelay | null = null;
   private chorus: Tone.Chorus | null = null;
@@ -56,9 +56,12 @@ class AudioEngine {
   private analyser: Tone.Analyser | null = null;
   private initialized = false;
   private arpInterval: ReturnType<typeof setInterval> | null = null;
-  private arpIndex = 0;
+  /** Note currently sounding in arp mode; used so we release the right note when the list shrinks. */
+  private currentArpNote: string | null = null;
   private currentChordNotes: string[] = [];
   private activeNotesModes: Map<string, PerformanceMode> = new Map();
+  /** Per-key voice tracking for true polyphony: key index → chord notes + bass note */
+  private activeVoices: Map<number, { notes: string[]; bassNote: string }> = new Map();
 
   state: SynthState = {
     volume: 0.7,
@@ -96,7 +99,7 @@ class AudioEngine {
         envelope: { attack: 0.02, decay: 0.3, sustain: 0.4, release: 1.2 },
       }).connect(this.distortion);
 
-      this.bassSynth = new Tone.Synth({
+      this.bassSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: 'triangle' },
         envelope: { attack: 0.02, decay: 0.2, sustain: 0.5, release: 0.8 },
       }).connect(this.distortion);
@@ -176,7 +179,7 @@ class AudioEngine {
       clearInterval(this.arpInterval);
       this.arpInterval = null;
     }
-    this.arpIndex = 0;
+    this.currentArpNote = null;
   }
 
   private midiToNote(midi: number): string {
@@ -212,48 +215,75 @@ class AudioEngine {
     return `${rootNote}${typeName}${extName}`;
   }
 
+  /** Flatten all chord notes from active keys (for display/arp). */
+  private getAllActiveChordNotes(): string[] {
+    return Array.from(this.activeVoices.values()).flatMap((v) => v.notes);
+  }
+
   playNote(noteIndex: number): string {
     if (!this.isReady() || !this.synth || !this.bassSynth) return '';
+    const existing = this.activeVoices.get(noteIndex);
+    if (existing) {
+      const now = Tone.now();
+      existing.notes.forEach((note) => this.synth!.triggerRelease(note, now));
+      this.bassSynth.triggerRelease(existing.bassNote, now);
+      existing.notes.forEach((note) => this.activeNotesModes.delete(note));
+    }
     const t0 = Tone.now() + 0.01;
     this.state.currentNote = noteIndex;
     const rootMidi = 48 + noteIndex + this.state.key;
     const chordMidi = this.buildChord(rootMidi);
-    this.currentChordNotes = chordMidi.map((m) => this.midiToNote(m));
-    this.currentChordNotes.forEach(note => this.activeNotesModes.set(note, this.state.performanceMode));
+    const noteStrings = chordMidi.map((m) => this.midiToNote(m));
+    noteStrings.forEach((note) => this.activeNotesModes.set(note, this.state.performanceMode));
 
     const bassOctave = 2 + Math.floor(this.state.bassVoicing * 2);
     const bassNote = `${NOTE_NAMES[rootMidi % 12]}${bassOctave}`;
+
+    this.activeVoices.set(noteIndex, { notes: noteStrings, bassNote });
+    this.currentChordNotes = this.getAllActiveChordNotes();
+
     this.bassSynth.triggerAttack(bassNote, t0);
 
     switch (this.state.performanceMode) {
       case 'poly':
-        this.synth.triggerAttack(this.currentChordNotes, t0);
+        this.synth.triggerAttack(noteStrings, t0);
         break;
       case 'strum': {
         this.stopArp();
         const strumPreset = SOUND_PRESETS[this.state.sound % SOUND_PRESETS.length];
-        this.currentChordNotes.forEach((note, i) => {
+        noteStrings.forEach((note, i) => {
           this.synth?.triggerAttackRelease(note, strumPreset.release + 1.0, t0 + i * 0.05);
         });
         break;
       }
       case 'arp': {
         this.stopArp();
-        this.arpIndex = 0;
-        if (this.currentChordNotes.length > 0) this.synth.triggerAttack(this.currentChordNotes[0], t0);
+        const allArpNotes = this.getAllActiveChordNotes();
+        if (allArpNotes.length > 0) {
+          this.currentArpNote = allArpNotes[0];
+          this.synth.triggerAttack(allArpNotes[0], t0);
+        }
         this.arpInterval = setInterval(() => {
-          if (this.synth && this.currentChordNotes.length > 0) {
+          const allNotes = this.getAllActiveChordNotes();
+          if (this.synth && allNotes.length > 0) {
             const now = Tone.now() + 0.01;
-            this.synth.triggerRelease(this.currentChordNotes[this.arpIndex], now);
-            this.arpIndex = (this.arpIndex + 1) % this.currentChordNotes.length;
-            this.synth.triggerAttack(this.currentChordNotes[this.arpIndex], now);
+            if (this.currentArpNote) this.synth.triggerRelease(this.currentArpNote, now);
+            const currentIndex = this.currentArpNote ? allNotes.indexOf(this.currentArpNote) : -1;
+            const nextIndex =
+              currentIndex >= 0
+                ? (currentIndex + 1) % allNotes.length
+                : 0;
+            this.currentArpNote = allNotes[nextIndex];
+            this.synth.triggerAttack(this.currentArpNote, now);
+          } else {
+            this.currentArpNote = null;
           }
         }, 60000 / this.state.bpm / 2);
         break;
       }
       case 'harp': {
         this.stopArp();
-        const allNotes = [...this.currentChordNotes];
+        const allNotes = [...noteStrings];
         chordMidi.forEach((m) => {
           allNotes.push(this.midiToNote(m + 12));
           this.activeNotesModes.set(this.midiToNote(m + 12), 'harp');
@@ -266,22 +296,34 @@ class AudioEngine {
     return this.getChordName(rootMidi);
   }
 
-  releaseNote(): void {
+  releaseNote(noteIndex: number): void {
     if (!this.synth || !this.bassSynth) return;
-    this.stopArp();
+    const entry = this.activeVoices.get(noteIndex);
+    if (!entry) return;
     const now = Tone.now();
-    this.synth.releaseAll(now);
-    this.bassSynth.triggerRelease(now);
-    this.currentChordNotes = [];
-    this.activeNotesModes.clear();
-    this.state.currentNote = -1;
+    entry.notes.forEach((note) => this.synth!.triggerRelease(note, now));
+    this.bassSynth.triggerRelease(entry.bassNote, now);
+    entry.notes.forEach((note) => this.activeNotesModes.delete(note));
+    this.activeVoices.delete(noteIndex);
+    this.currentChordNotes = this.getAllActiveChordNotes();
+    if (this.activeVoices.size === 0) this.state.currentNote = -1;
+    if (this.state.performanceMode === 'arp' && this.activeVoices.size === 0) this.stopArp();
   }
 
   releaseSpecificNote(noteToRelease: string): void {
-    if (!this.synth) return;
+    if (!this.synth || !this.bassSynth) return;
     this.synth.triggerRelease(noteToRelease, Tone.now());
     this.activeNotesModes.delete(noteToRelease);
-    this.currentChordNotes = this.currentChordNotes.filter(n => n !== noteToRelease);
+    for (const [keyIndex, entry] of this.activeVoices.entries()) {
+      if (entry.notes.includes(noteToRelease)) {
+        entry.notes = entry.notes.filter((n) => n !== noteToRelease);
+        if (entry.notes.length === 0) {
+          this.bassSynth.triggerRelease(entry.bassNote, Tone.now());
+          this.activeVoices.delete(keyIndex);
+        }
+      }
+    }
+    this.currentChordNotes = this.getAllActiveChordNotes();
   }
 
   getPresetName(): string {
@@ -299,8 +341,9 @@ class AudioEngine {
 
   getActiveNotes(): Array<{ note: string; mode: PerformanceMode }> {
     if (!this.synth) return [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const voices = (this.synth as any)._voices as Tone.Synth[] | undefined;
+    type VoiceLike = { envelope: { value: number }; frequency: { value: number } };
+    const synthWithVoices = this.synth as unknown as { _voices?: VoiceLike[] };
+    const voices = synthWithVoices._voices;
     if (!voices) {
       return this.currentChordNotes.map(note => ({
         note,
@@ -309,7 +352,7 @@ class AudioEngine {
     }
     const activeNotes: Array<{ note: string; mode: PerformanceMode }> = [];
     const seenNotes = new Set<string>();
-    voices.forEach((voice: Tone.Synth) => {
+    voices.forEach((voice: VoiceLike) => {
       const env = voice.envelope;
       if (env && env.value > 0.01) {
         const note = Tone.Frequency(voice.frequency.value).toNote();
@@ -336,6 +379,10 @@ class AudioEngine {
     this.tremolo?.dispose();
     this.distortion?.dispose();
     this.analyser?.dispose();
+    this.activeVoices.clear();
+    this.currentChordNotes = [];
+    this.activeNotesModes.clear();
+    this.state.currentNote = -1;
     this.initialized = false;
   }
 }
