@@ -179,6 +179,9 @@ class AudioEngine {
       clearInterval(this.arpInterval);
       this.arpInterval = null;
     }
+    if (this.currentArpNote && this.synth) {
+      this.synth.triggerRelease(this.currentArpNote, Tone.now());
+    }
     this.currentArpNote = null;
   }
 
