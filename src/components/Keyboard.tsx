@@ -5,6 +5,8 @@ interface KeyboardProps {
   onNoteOn: (note: number) => void;
   onNoteOff: (note: number) => void;
   activeNotes: Set<number>;
+  /** Called on first pointer/key interaction - use to initialize audio */
+  onFirstInteraction?: () => void;
 }
 
 const WHITE_KEYS = [0, 2, 4, 5, 7, 9, 11, 12];
@@ -21,10 +23,13 @@ const KEY_CODE_MAP: Record<string, number> = {
   KeyZ: 0, KeyS: 1, KeyX: 2, KeyD: 3, KeyC: 4, KeyV: 5, KeyG: 6, KeyB: 7, KeyH: 8, KeyN: 9, KeyJ: 10, KeyM: 11, Comma: 12,
 };
 
-export function Keyboard({ onNoteOn, onNoteOff, activeNotes }: KeyboardProps) {
+export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onFirstInteraction }: KeyboardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const activePointersRef = useRef<Map<number, number>>(new Map()); // pointerId -> note
-  const keyboardKeysRef = useRef<Set<number>>(new Set()); // Currently held keyboard keys
+  
+  // Track which notes are held by which input sources
+  // Key: note number, Value: Set of source IDs (pointer IDs or 'keyboard')
+  const noteHoldersRef = useRef<Map<number, Set<string | number>>>(new Map());
+  const firstInteractionFiredRef = useRef(false);
 
   const whiteKeyWidthPercent = 100 / WHITE_KEYS.length;
   
@@ -71,82 +76,130 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes }: KeyboardProps) {
     return null;
   }, [blackKeys, whiteKeyWidthPercent]);
 
-  // Handle pointer down - start tracking this pointer
+  // Add a holder to a note, trigger noteOn if first holder
+  const addNoteHolder = useCallback((note: number, holderId: string | number) => {
+    const holders = noteHoldersRef.current;
+    if (!holders.has(note)) {
+      holders.set(note, new Set());
+    }
+    const noteHolders = holders.get(note)!;
+    const wasEmpty = noteHolders.size === 0;
+    noteHolders.add(holderId);
+    
+    if (wasEmpty) {
+      onNoteOn(note);
+    }
+  }, [onNoteOn]);
+
+  // Remove a holder from a note, trigger noteOff if last holder
+  const removeNoteHolder = useCallback((note: number, holderId: string | number) => {
+    const holders = noteHoldersRef.current;
+    const noteHolders = holders.get(note);
+    if (!noteHolders) return;
+    
+    noteHolders.delete(holderId);
+    
+    if (noteHolders.size === 0) {
+      holders.delete(note);
+      onNoteOff(note);
+    }
+  }, [onNoteOff]);
+
+  // Get the note currently held by a pointer (if any)
+  const getPointerNote = useCallback((pointerId: number): number | null => {
+    for (const [note, holders] of noteHoldersRef.current.entries()) {
+      if (holders.has(pointerId)) {
+        return note;
+      }
+    }
+    return null;
+  }, []);
+
+  // Fire first interaction callback
+  const fireFirstInteraction = useCallback(() => {
+    if (!firstInteractionFiredRef.current && onFirstInteraction) {
+      firstInteractionFiredRef.current = true;
+      onFirstInteraction();
+    }
+  }, [onFirstInteraction]);
+
+  // Handle pointer down
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
+    fireFirstInteraction();
     
-    // Capture this pointer to receive all its events
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    // Capture pointer on container
+    containerRef.current?.setPointerCapture(e.pointerId);
     
     const note = getNoteFromPoint(e.clientX, e.clientY);
     if (note !== null) {
-      activePointersRef.current.set(e.pointerId, note);
-      onNoteOn(note);
+      addNoteHolder(note, e.pointerId);
     }
-  }, [getNoteFromPoint, onNoteOn]);
+  }, [getNoteFromPoint, addNoteHolder, fireFirstInteraction]);
 
   // Handle pointer move - for sliding across keys
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    // Only process if this pointer is being tracked (was pressed down on keyboard)
-    if (!activePointersRef.current.has(e.pointerId)) return;
-
-    const currentNote = activePointersRef.current.get(e.pointerId);
+    const currentNote = getPointerNote(e.pointerId);
+    if (currentNote === null) return; // Not tracking this pointer
+    
     const newNote = getNoteFromPoint(e.clientX, e.clientY);
-
-    // If moved to a different key
+    
     if (newNote !== currentNote) {
-      // Release old note if there was one
-      if (currentNote !== undefined) {
-        onNoteOff(currentNote);
-      }
+      // Remove from old note
+      removeNoteHolder(currentNote, e.pointerId);
       
-      // Play new note if there is one
+      // Add to new note (if on a key)
       if (newNote !== null) {
-        activePointersRef.current.set(e.pointerId, newNote);
-        onNoteOn(newNote);
-      } else {
-        // Moved out of keyboard area
-        activePointersRef.current.delete(e.pointerId);
+        addNoteHolder(newNote, e.pointerId);
       }
     }
-  }, [getNoteFromPoint, onNoteOn, onNoteOff]);
+  }, [getNoteFromPoint, getPointerNote, addNoteHolder, removeNoteHolder]);
 
-  // Handle pointer up/cancel - stop tracking this pointer
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    const note = activePointersRef.current.get(e.pointerId);
-    if (note !== undefined) {
-      onNoteOff(note);
-      activePointersRef.current.delete(e.pointerId);
+  // Handle pointer up/cancel/leave/lostcapture - stop tracking this pointer
+  const handlePointerEnd = useCallback((e: React.PointerEvent) => {
+    const currentNote = getPointerNote(e.pointerId);
+    if (currentNote !== null) {
+      removeNoteHolder(currentNote, e.pointerId);
     }
     
     // Release pointer capture
-    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
-  }, [onNoteOff]);
+    try {
+      containerRef.current?.releasePointerCapture(e.pointerId);
+    } catch {
+      // Ignore - capture may already be released
+    }
+  }, [getPointerNote, removeNoteHolder]);
 
   // Keyboard input handling
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.repeat) return;
       const note = KEY_CODE_MAP[e.code];
-      if (note !== undefined && !keyboardKeysRef.current.has(note)) {
-        e.preventDefault();
-        keyboardKeysRef.current.add(note);
-        onNoteOn(note);
-      }
+      if (note === undefined) return;
+      
+      // Check if keyboard is already holding this note
+      const holders = noteHoldersRef.current.get(note);
+      if (holders?.has('keyboard')) return;
+      
+      e.preventDefault();
+      fireFirstInteraction();
+      addNoteHolder(note, 'keyboard');
     },
-    [onNoteOn]
+    [addNoteHolder, fireFirstInteraction]
   );
 
   const handleKeyUp = useCallback(
     (e: KeyboardEvent) => {
       const note = KEY_CODE_MAP[e.code];
-      if (note !== undefined && keyboardKeysRef.current.has(note)) {
-        e.preventDefault();
-        keyboardKeysRef.current.delete(note);
-        onNoteOff(note);
-      }
+      if (note === undefined) return;
+      
+      const holders = noteHoldersRef.current.get(note);
+      if (!holders?.has('keyboard')) return;
+      
+      e.preventDefault();
+      removeNoteHolder(note, 'keyboard');
     },
-    [onNoteOff]
+    [removeNoteHolder]
   );
 
   useEffect(() => {
@@ -158,15 +211,23 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes }: KeyboardProps) {
     };
   }, [handleKeyDown, handleKeyUp]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount only - release all notes
+  // Using a ref to store onNoteOff so we don't re-run when callback changes
+  const onNoteOffRef = useRef(onNoteOff);
+  onNoteOffRef.current = onNoteOff;
+  
   useEffect(() => {
-    const activePointers = activePointersRef.current;
-    const keyboardKeys = keyboardKeysRef.current;
     return () => {
-      activePointers.clear();
-      keyboardKeys.clear();
+      // Release all held notes on unmount
+      const noteHolders = noteHoldersRef.current;
+      for (const [note, holders] of noteHolders.entries()) {
+        if (holders.size > 0) {
+          onNoteOffRef.current(note);
+        }
+      }
+      noteHolders.clear();
     };
-  }, []);
+  }, []); // Empty deps - only run on unmount
 
   return (
     <div
@@ -175,9 +236,10 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes }: KeyboardProps) {
       style={{ touchAction: 'none' }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      onPointerLeave={handlePointerUp}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={handlePointerEnd}
+      onPointerLeave={handlePointerEnd}
+      onLostPointerCapture={handlePointerEnd}
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* White keys */}

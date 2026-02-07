@@ -60,8 +60,12 @@ class AudioEngine {
   private currentArpNote: string | null = null;
   private currentChordNotes: string[] = [];
   private activeNotesModes: Map<string, PerformanceMode> = new Map();
-  /** Per-key voice tracking for true polyphony: key index → chord notes + bass note */
-  private activeVoices: Map<number, { notes: string[]; bassNote: string }> = new Map();
+  /** Per-key voice tracking for true polyphony: key index → chord notes + bass note + whether notes auto-release */
+  private activeVoices: Map<number, { notes: string[]; bassNote: string; autoRelease: boolean }> = new Map();
+  /** Reference count for each sounding note - only release when count reaches 0 */
+  private noteRefCount: Map<string, number> = new Map();
+  /** Reference count for each sounding bass note */
+  private bassRefCount: Map<string, number> = new Map();
 
   state: SynthState = {
     volume: 0.7,
@@ -94,15 +98,18 @@ class AudioEngine {
       this.tremolo = new Tone.Tremolo({ frequency: 4, depth: 0.6, wet: 0 }).connect(this.phaser).start();
       this.distortion = new Tone.Distortion({ distortion: 0.1, wet: 0 }).connect(this.tremolo);
 
+      // Set maxPolyphony high enough to handle multiple chords (each chord has ~4-6 notes)
       this.synth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: 'triangle' },
         envelope: { attack: 0.02, decay: 0.3, sustain: 0.4, release: 1.2 },
       }).connect(this.distortion);
+      this.synth.maxPolyphony = 64;
 
       this.bassSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: 'triangle' },
         envelope: { attack: 0.02, decay: 0.2, sustain: 0.5, release: 0.8 },
       }).connect(this.distortion);
+      this.bassSynth.maxPolyphony = 16;
 
       this.updateVolume(this.state.volume);
       this.initialized = true;
@@ -225,13 +232,13 @@ class AudioEngine {
 
   playNote(noteIndex: number): string {
     if (!this.isReady() || !this.synth || !this.bassSynth) return '';
+    
+    // Handle re-triggering a key that's already playing - release its notes first
     const existing = this.activeVoices.get(noteIndex);
     if (existing) {
-      const now = Tone.now();
-      existing.notes.forEach((note) => this.synth!.triggerRelease(note, now));
-      this.bassSynth.triggerRelease(existing.bassNote, now);
-      existing.notes.forEach((note) => this.activeNotesModes.delete(note));
+      this.releaseVoiceNotes(existing, noteIndex);
     }
+    
     const t0 = Tone.now() + 0.01;
     this.state.currentNote = noteIndex;
     const rootMidi = 48 + noteIndex + this.state.key;
@@ -242,18 +249,34 @@ class AudioEngine {
     const bassOctave = 2 + Math.floor(this.state.bassVoicing * 2);
     const bassNote = `${NOTE_NAMES[rootMidi % 12]}${bassOctave}`;
 
-    this.activeVoices.set(noteIndex, { notes: noteStrings, bassNote });
-    this.currentChordNotes = this.getAllActiveChordNotes();
+    // Determine if this mode auto-releases notes (strum/harp use triggerAttackRelease)
+    const autoRelease = this.state.performanceMode === 'strum' || this.state.performanceMode === 'harp';
+    
+    // Track all notes for this key (including octave-up for harp)
+    let allTrackedNotes = [...noteStrings];
 
-    this.bassSynth.triggerAttack(bassNote, t0);
+    // For bass: increment ref count, only trigger if first reference
+    const bassCount = this.bassRefCount.get(bassNote) || 0;
+    this.bassRefCount.set(bassNote, bassCount + 1);
+    if (bassCount === 0) {
+      this.bassSynth.triggerAttack(bassNote, t0);
+    }
 
     switch (this.state.performanceMode) {
       case 'poly':
-        this.synth.triggerAttack(noteStrings, t0);
+        // Increment ref count for each note, only trigger if first reference
+        noteStrings.forEach((note) => {
+          const count = this.noteRefCount.get(note) || 0;
+          this.noteRefCount.set(note, count + 1);
+          if (count === 0) {
+            this.synth!.triggerAttack(note, t0);
+          }
+        });
         break;
       case 'strum': {
         this.stopArp();
         const strumPreset = SOUND_PRESETS[this.state.sound % SOUND_PRESETS.length];
+        // Strum mode doesn't need ref counting since it auto-releases
         noteStrings.forEach((note, i) => {
           this.synth?.triggerAttackRelease(note, strumPreset.release + 1.0, t0 + i * 0.05);
         });
@@ -261,6 +284,7 @@ class AudioEngine {
       }
       case 'arp': {
         this.stopArp();
+        // Arp mode manages its own note triggering
         const allArpNotes = this.getAllActiveChordNotes();
         if (allArpNotes.length > 0) {
           this.currentArpNote = allArpNotes[0];
@@ -286,27 +310,64 @@ class AudioEngine {
       }
       case 'harp': {
         this.stopArp();
-        const allNotes = [...noteStrings];
-        chordMidi.forEach((m) => {
-          allNotes.push(this.midiToNote(m + 12));
-          this.activeNotesModes.set(this.midiToNote(m + 12), 'harp');
-        });
+        // Add octave-up notes for harp mode - auto-releases so no ref counting needed
+        const octaveUpNotes = chordMidi.map((m) => this.midiToNote(m + 12));
+        allTrackedNotes = [...noteStrings, ...octaveUpNotes];
+        octaveUpNotes.forEach((note) => this.activeNotesModes.set(note, 'harp'));
         const preset = SOUND_PRESETS[this.state.sound % SOUND_PRESETS.length];
-        allNotes.forEach((note, i) => this.synth?.triggerAttackRelease(note, preset.release + 0.5, t0 + i * 0.03));
+        allTrackedNotes.forEach((note, i) => this.synth?.triggerAttackRelease(note, preset.release + 0.5, t0 + i * 0.03));
         break;
       }
     }
+    
+    // Store voice tracking with all notes (including harp octave-up notes)
+    this.activeVoices.set(noteIndex, { notes: allTrackedNotes, bassNote, autoRelease });
+    this.currentChordNotes = this.getAllActiveChordNotes();
+
     return this.getChordName(rootMidi);
+  }
+
+  /** Release notes for a voice entry - decrement ref counts and release when zero */
+  private releaseVoiceNotes(entry: { notes: string[]; bassNote: string; autoRelease: boolean }, _voiceIndex: number): void {
+    if (!this.synth || !this.bassSynth) return;
+    const now = Tone.now();
+    
+    // Only release synth notes if they weren't auto-released (strum/harp auto-release)
+    if (!entry.autoRelease) {
+      entry.notes.forEach((note) => {
+        const count = this.noteRefCount.get(note) || 0;
+        if (count <= 1) {
+          // Last voice using this note - actually release it
+          this.noteRefCount.delete(note);
+          this.synth!.triggerRelease(note, now);
+        } else {
+          // Other voices still need this note - just decrement
+          this.noteRefCount.set(note, count - 1);
+        }
+      });
+    }
+    
+    // Decrement bass ref count, release if last reference
+    const bassCount = this.bassRefCount.get(entry.bassNote) || 0;
+    if (bassCount <= 1) {
+      this.bassRefCount.delete(entry.bassNote);
+      this.bassSynth.triggerRelease(entry.bassNote, now);
+    } else {
+      this.bassRefCount.set(entry.bassNote, bassCount - 1);
+    }
+    
+    // Clean up mode tracking
+    entry.notes.forEach((note) => this.activeNotesModes.delete(note));
   }
 
   releaseNote(noteIndex: number): void {
     if (!this.synth || !this.bassSynth) return;
     const entry = this.activeVoices.get(noteIndex);
     if (!entry) return;
-    const now = Tone.now();
-    entry.notes.forEach((note) => this.synth!.triggerRelease(note, now));
-    this.bassSynth.triggerRelease(entry.bassNote, now);
-    entry.notes.forEach((note) => this.activeNotesModes.delete(note));
+    
+    // Release notes, passing the voice index so we can check if other voices need them
+    this.releaseVoiceNotes(entry, noteIndex);
+    
     this.activeVoices.delete(noteIndex);
     this.currentChordNotes = this.getAllActiveChordNotes();
     if (this.activeVoices.size === 0) this.state.currentNote = -1;
@@ -315,18 +376,56 @@ class AudioEngine {
 
   releaseSpecificNote(noteToRelease: string): void {
     if (!this.synth || !this.bassSynth) return;
+    
+    // Force release the note regardless of ref count (user explicitly removing it)
+    this.noteRefCount.delete(noteToRelease);
     this.synth.triggerRelease(noteToRelease, Tone.now());
+    
     this.activeNotesModes.delete(noteToRelease);
     for (const [keyIndex, entry] of this.activeVoices.entries()) {
       if (entry.notes.includes(noteToRelease)) {
         entry.notes = entry.notes.filter((n) => n !== noteToRelease);
         if (entry.notes.length === 0) {
-          this.bassSynth.triggerRelease(entry.bassNote, Tone.now());
+          // Force release bass too since this voice has no notes left
+          const bassCount = this.bassRefCount.get(entry.bassNote) || 0;
+          if (bassCount <= 1) {
+            this.bassRefCount.delete(entry.bassNote);
+            this.bassSynth.triggerRelease(entry.bassNote, Tone.now());
+          } else {
+            this.bassRefCount.set(entry.bassNote, bassCount - 1);
+          }
           this.activeVoices.delete(keyIndex);
         }
       }
     }
     this.currentChordNotes = this.getAllActiveChordNotes();
+  }
+
+  /** Release ALL notes immediately - panic button for stuck notes */
+  releaseAll(): void {
+    if (!this.synth || !this.bassSynth) return;
+    const now = Tone.now();
+    
+    // Release all tracked notes
+    for (const note of this.noteRefCount.keys()) {
+      this.synth.triggerRelease(note, now);
+    }
+    for (const bassNote of this.bassRefCount.keys()) {
+      this.bassSynth.triggerRelease(bassNote, now);
+    }
+    
+    // Also release any notes Tone.js might still have (belt and suspenders)
+    this.synth.releaseAll(now);
+    this.bassSynth.releaseAll(now);
+    
+    // Clear all tracking state
+    this.noteRefCount.clear();
+    this.bassRefCount.clear();
+    this.activeVoices.clear();
+    this.activeNotesModes.clear();
+    this.currentChordNotes = [];
+    this.state.currentNote = -1;
+    this.stopArp();
   }
 
   getPresetName(): string {

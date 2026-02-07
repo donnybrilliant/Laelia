@@ -54,23 +54,12 @@ export function LaeliaSynth() {
     return true;
   }, [isReady, unlockAudio]);
 
-  // Eagerly initialize audio on first user interaction with the page
-  // This ensures audio is ready before keyboard keys are pressed
-  useEffect(() => {
-    const initOnInteraction = () => {
-      if (initStartedRef.current) return;
-      initStartedRef.current = true;
-      ensureAudio();
-      // Remove listeners once init has started
-      document.removeEventListener("pointerdown", initOnInteraction);
-      document.removeEventListener("keydown", initOnInteraction);
-    };
-    document.addEventListener("pointerdown", initOnInteraction, { once: true });
-    document.addEventListener("keydown", initOnInteraction, { once: true });
-    return () => {
-      document.removeEventListener("pointerdown", initOnInteraction);
-      document.removeEventListener("keydown", initOnInteraction);
-    };
+  // Eagerly initialize audio on first user interaction
+  // Called by Keyboard on first touch/key, and by other UI elements
+  const triggerAudioInit = useCallback(() => {
+    if (initStartedRef.current) return;
+    initStartedRef.current = true;
+    ensureAudio();
   }, [ensureAudio]);
 
   const toggleExtension = (ext: "6" | "m7" | "M7" | "9") => {
@@ -149,31 +138,42 @@ export function LaeliaSynth() {
 
   const handleNoteOn = useCallback(
     (note: number) => {
-      // Start init if not already (in case user somehow bypassed the document listener)
-      if (!initStartedRef.current) {
-        initStartedRef.current = true;
-        ensureAudio();
-      }
-      // Only play if audio engine is ready - this avoids race conditions
-      // If not ready yet, we simply don't play (user can press again once ready)
+      // Always update pressedKeys for visual feedback
+      setPressedKeys((prev) => new Set(prev).add(note));
+      
+      // Only play audio if engine is ready
       if (!isReady) return;
       
       const chordName = audioEngine.playNote(note);
       setCurrentChord(chordName);
-      setPressedKeys((prev) => new Set(prev).add(note));
     },
-    [ensureAudio, isReady],
+    [isReady],
   );
 
   const handleNoteOff = useCallback((note: number) => {
-    audioEngine.releaseNote(note);
+    // Track if we're releasing all notes (to avoid redundant releaseNote call)
+    let releasedAll = false;
+    
+    // Always update pressedKeys for visual feedback
     setPressedKeys((prev) => {
       const next = new Set(prev);
       next.delete(note);
-      if (next.size === 0) setCurrentChord("");
+      if (next.size === 0) {
+        setCurrentChord("");
+        // Defensive: when all UI keys are released, ensure audio is fully silent
+        // This catches any desync between UI state and audio engine
+        if (isReady) {
+          audioEngine.releaseAll();
+          releasedAll = true;
+        }
+      }
       return next;
     });
-  }, []);
+    
+    // Only release individual note if we didn't already release all
+    if (!isReady || releasedAll) return;
+    audioEngine.releaseNote(note);
+  }, [isReady]);
 
   const handleRemoveActiveNote = useCallback((note: string) => {
     audioEngine.releaseSpecificNote(note);
@@ -212,6 +212,7 @@ export function LaeliaSynth() {
         handleNoteOn={handleNoteOn}
         handleNoteOff={handleNoteOff}
         getPresetName={() => audioEngine.getPresetName()}
+        triggerAudioInit={triggerAudioInit}
       />
     );
   }
@@ -447,6 +448,7 @@ export function LaeliaSynth() {
                   onNoteOn={handleNoteOn}
                   onNoteOff={handleNoteOff}
                   activeNotes={pressedKeys}
+                  onFirstInteraction={triggerAudioInit}
                 />
               </div>
             </div>

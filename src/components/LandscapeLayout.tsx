@@ -40,6 +40,7 @@ interface LandscapeLayoutProps {
   handleNoteOn: (note: number) => void;
   handleNoteOff: (note: number) => void;
   getPresetName: () => string;
+  triggerAudioInit: () => void;
 }
 
 export function LandscapeLayout({
@@ -72,6 +73,7 @@ export function LandscapeLayout({
   handleNoteOn,
   handleNoteOff,
   getPresetName,
+  triggerAudioInit,
 }: LandscapeLayoutProps) {
   const [isControlsOpen, setIsControlsOpen] = useState(false);
 
@@ -372,6 +374,7 @@ export function LandscapeLayout({
           onNoteOn={handleNoteOn}
           onNoteOff={handleNoteOff}
           activeNotes={pressedKeys}
+          onFirstInteraction={triggerAudioInit}
         />
       </div>
     </div>
