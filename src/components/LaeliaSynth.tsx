@@ -23,6 +23,8 @@ export function LaeliaSynth() {
     Array<{ note: string; mode: PerformanceMode }>
   >([]);
   const pollRef = useRef<number | null>(null);
+  /** Track notes that are initializing (between handleNoteOn start and playNote call) */
+  const pendingNotesRef = useRef<Set<number>>(new Set());
 
   const [volume, setVolume] = useState(0.7);
   const [sound, setSound] = useState(0);
@@ -128,8 +130,13 @@ export function LaeliaSynth() {
 
   const handleNoteOn = useCallback(
     async (note: number) => {
+      pendingNotesRef.current.add(note);
       unlockAudio();
       await ensureAudio();
+      if (!pendingNotesRef.current.has(note)) {
+        return;
+      }
+      pendingNotesRef.current.delete(note);
       const chordName = audioEngine.playNote(note);
       setCurrentChord(chordName);
       setPressedKeys((prev) => new Set(prev).add(note));
@@ -138,6 +145,10 @@ export function LaeliaSynth() {
   );
 
   const handleNoteOff = useCallback((note: number) => {
+    if (pendingNotesRef.current.has(note)) {
+      pendingNotesRef.current.delete(note);
+      return;
+    }
     audioEngine.releaseNote(note);
     setPressedKeys((prev) => {
       const next = new Set(prev);
