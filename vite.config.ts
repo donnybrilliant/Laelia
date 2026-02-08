@@ -19,7 +19,7 @@ export default defineConfig({
         short_name: 'Laelia',
         description: 'Chord synth inspired by Orchid (Telepathic Instruments) and the sound of Tame Impala. Chords, strums, arps, harp in the browser.',
         theme_color: '#1a1d24',
-        background_color: '#14161b',
+        background_color: '#1a1d24',
         display: 'standalone',
         display_override: ['window-controls-overlay', 'standalone'],
         orientation: 'portrait',
