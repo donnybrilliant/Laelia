@@ -447,7 +447,7 @@ export function LaeliaSynth() {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="relative z-10 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="flex flex-col gap-2">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
                 Performance (1-4)

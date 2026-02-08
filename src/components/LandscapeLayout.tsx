@@ -217,11 +217,11 @@ export function LandscapeLayout({
         </button>
       </div>
 
-      {/* Pulldown controls sheet - inert when closed so controls are skipped when tabbing */}
+      {/* Pulldown controls sheet - inert when closed so controls are skipped when tabbing; z-10 so taps hit controls not keyboard */}
       <div
         inert={!isControlsOpen}
         className={`
-          overflow-hidden transition-all duration-300 ease-in-out shrink-0
+          relative z-10 overflow-hidden transition-all duration-300 ease-in-out shrink-0
           ${isControlsOpen ? "max-h-[200px] opacity-100" : "max-h-0 opacity-0"}
         `}
       >
