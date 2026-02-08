@@ -146,7 +146,7 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAud
     [blackKeys],
   );
 
-  // Handle pointer down - start tracking this pointer
+  // Handle pointer down - start tracking this pointer (only when audio is ready)
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
@@ -154,6 +154,10 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAud
       // MUST run synchronously in the same user gesture - required for mobile audio context unlock
       audioEngine.unlockAudio();
       onPointerDownForAudio?.();
+
+      // Only track and play when engine is ready - avoids keys staying "selected" from pre-ready slides (desktop)
+      // and avoids odd first-tap behavior on mobile (first tap only unlocks, next tap plays)
+      if (!audioEngine.isReady()) return;
 
       // Capture pointer on container to ensure all events route here
       containerRef.current?.setPointerCapture(e.pointerId);
@@ -223,10 +227,11 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAud
     [onNoteOff, isNoteHeldByAnySource],
   );
 
-  // Keyboard input handling
+  // Keyboard input handling (only when audio is ready, same as pointer)
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.repeat) return;
+      if (!audioEngine.isReady()) return;
       const note = KEY_CODE_MAP[e.code];
       if (note !== undefined && !keyboardKeysRef.current.has(note)) {
         e.preventDefault();
@@ -288,6 +293,7 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAud
     (e: React.KeyboardEvent, note: number) => {
       if (e.key === " " || e.key === "Enter") {
         e.preventDefault();
+        if (!audioEngine.isReady()) return;
         if (!keyboardKeysRef.current.has(note)) {
           keyboardKeysRef.current.add(note);
           onNoteOn(note);

@@ -87,10 +87,16 @@ class AudioEngine {
   async init(): Promise<boolean> {
     if (this.initialized) return true;
     try {
-      await Tone.start();
       const ctx = Tone.getContext();
-      if (ctx.state === 'suspended') await ctx.resume();
-      if (ctx.state !== 'running') return false;
+      // Don't rely only on await Tone.start() - it can hang on Chrome iOS. Race with a short wait, then poll.
+      const startResolved = await Promise.race([
+        Tone.start().then(() => ctx.state === 'running'),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(ctx.state === 'running'), 400)),
+      ]);
+      if (!startResolved && ctx.state !== 'running') {
+        const ok = await this.waitForContextRunning(5000);
+        if (!ok) return false;
+      }
 
       this.analyser = new Tone.Analyser('waveform', 128);
       this.reverb = new Tone.Reverb({ decay: 2.5, wet: 0.3 }).toDestination();
@@ -120,9 +126,34 @@ class AudioEngine {
     }
   }
 
+  /** Call synchronously in a user gesture (e.g. pointer down). Required on mobile Safari/Chrome. */
   unlockAudio(): void {
+    Tone.start();
     const ctx = Tone.getContext();
     if (ctx.state === 'suspended') ctx.resume();
+    // Chrome iOS and some mobile browsers use 'interrupted' state; Tone only handles 'suspended'. Raw resume helps.
+    const raw = (ctx as unknown as { rawContext?: AudioContext }).rawContext;
+    if (raw?.resume) raw.resume();
+  }
+
+  /** Wait for context to be running without hanging (Chrome iOS can leave Tone.start() unresolved). */
+  private async waitForContextRunning(maxMs: number): Promise<boolean> {
+    const ctx = Tone.getContext();
+    const raw = (ctx as unknown as { rawContext?: AudioContext }).rawContext;
+    const start = Date.now();
+    while (Date.now() - start < maxMs) {
+      if (ctx.state === 'running') return true;
+      if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+        try {
+          ctx.resume();
+          if (raw?.resume) raw.resume();
+        } catch {
+          // ignore
+        }
+      }
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    return ctx.state === 'running';
   }
 
   async ensureReady(): Promise<boolean> {

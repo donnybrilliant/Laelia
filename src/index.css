@@ -31,7 +31,7 @@
   --font-mono: 'JetBrains Mono', monospace;
   --font-display: 'JetBrains Mono', monospace;
   --animate-pulse-glow: pulse-glow 2s ease-in-out infinite;
-  --animate-power-on: power-on 1.2s ease-in-out forwards;
+  --animate-power-on: power-on 0.5s ease-in-out forwards;
 }
 
 @keyframes pulse-glow {

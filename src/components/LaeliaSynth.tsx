@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from "react";
+import { flushSync } from "react-dom";
 import {
   audioEngine,
   PerformanceMode,
@@ -13,9 +14,11 @@ import { ModeButton } from "./ModeButton";
 import { Visualizer } from "./Visualizer";
 import { LandscapeLayout } from "./LandscapeLayout";
 import { useLandscapeMobile } from "@/hooks/use-landscape-mobile";
+import { useKeyLabels } from "@/hooks/use-key-labels";
 
 export function LaeliaSynth() {
   const isLandscapeMobile = useLandscapeMobile();
+  const { extensionsLabel, keyboardLabel } = useKeyLabels();
   const [isReady, setIsReady] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [currentChord, setCurrentChord] = useState("");
@@ -45,25 +48,43 @@ export function LaeliaSynth() {
 
   const unlockAudio = useCallback(() => audioEngine.unlockAudio(), []);
 
+  /** Nudge Safari to paint after async state updates so the power light turns yellow without another tap */
+  const forceRepaint = useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        void document.body.offsetHeight;
+      });
+    });
+  }, []);
+
   const ensureAudio = useCallback(async () => {
     // MUST call unlockAudio synchronously - mobile requires audio context resume in same user gesture
     unlockAudio();
     if (!isReady) {
       setIsInitializing(true);
-      // Don't yield before ensureReady - breaks mobile user gesture chain
-      const start = Date.now();
-      const success = await audioEngine.ensureReady();
-      if (success) setIsReady(true);
-      const elapsed = Date.now() - start;
-      const minInitMs = 1400; // Let power-on animation complete full cycle (grow + grow back)
-      if (elapsed < minInitMs) {
-        await new Promise((r) => setTimeout(r, minInitMs - elapsed));
+      const INIT_TIMEOUT_MS = 10000; // Fallback if engine never becomes ready
+      let success = false;
+      try {
+        success = await Promise.race([
+          audioEngine.ensureReady(),
+          new Promise<false>((resolve) =>
+            setTimeout(() => resolve(false), INIT_TIMEOUT_MS),
+          ),
+        ]);
+      } catch {
+        success = false;
       }
-      setIsInitializing(false);
+      // flushSync so state is committed; then force Safari to paint (otherwise light stays green until next tap)
+      flushSync(() => {
+        if (success) setIsReady(true);
+        setIsInitializing(false);
+      });
+      forceRepaint();
+      if (!success) initStartedRef.current = false; // Allow retry on next tap (e.g. Chrome mobile hang)
       return success;
     }
     return true;
-  }, [isReady, unlockAudio]);
+  }, [isReady, unlockAudio, forceRepaint]);
 
   // Eagerly initialize audio on first user interaction (non-blocking)
   // Called synchronously to avoid race conditions with note events
@@ -72,6 +93,21 @@ export function LaeliaSynth() {
     initStartedRef.current = true;
     ensureAudio(); // Fire and forget - don't await
   }, [ensureAudio]);
+
+  // Sync power light to actual engine state; force repaint so Safari shows yellow without needing another tap
+  useEffect(() => {
+    if (!isInitializing) return;
+    const id = setInterval(() => {
+      if (audioEngine.isReady()) {
+        flushSync(() => {
+          setIsReady(true);
+          setIsInitializing(false);
+        });
+        forceRepaint();
+      }
+    }, 80);
+    return () => clearInterval(id);
+  }, [isInitializing, forceRepaint]);
 
   const toggleExtension = (ext: "6" | "m7" | "M7" | "9") => {
     setExtensions((prev) => {
@@ -453,7 +489,7 @@ export function LaeliaSynth() {
             </div>
             <div className="flex flex-col gap-2">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-                Extensions (9-=)
+                {extensionsLabel}
               </span>
               <div className="grid grid-cols-4 gap-1">
                 <ChordButton
@@ -486,7 +522,7 @@ export function LaeliaSynth() {
 
           <div className="flex flex-col gap-2">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-              Keyboard (Z–, keys)
+              {keyboardLabel}
             </span>
             <div className="flex gap-4 items-stretch">
               <div className="flex flex-col justify-center gap-4">

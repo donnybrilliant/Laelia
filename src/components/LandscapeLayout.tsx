@@ -294,7 +294,7 @@ export function LandscapeLayout({
             {/* Performance modes */}
             <div className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-                Performance (1-4)
+                Performance
               </span>
               <div className="flex gap-1">
                 {PERFORMANCE_MODES.map((mode) => (
@@ -320,7 +320,7 @@ export function LandscapeLayout({
             {/* Chord types */}
             <div className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-                Chord Type (5-8)
+                Chord Type
               </span>
               <div className="flex gap-1">
                 <ChordButton
@@ -349,7 +349,7 @@ export function LandscapeLayout({
             {/* Extensions */}
             <div className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-                Extensions (9-=)
+                Extensions
               </span>
               <div className="flex gap-1">
                 <ChordButton
