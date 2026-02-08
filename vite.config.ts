@@ -13,7 +13,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'],
+      includeAssets: ['icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'splash/*.png'],
       manifest: {
         name: 'Laelia — Chord Synth',
         short_name: 'Laelia',
