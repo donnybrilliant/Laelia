@@ -317,6 +317,12 @@ export function LaeliaSynth() {
             <button
               type="button"
               onClick={() => ensureAudio()}
+              onPointerDown={(e) => {
+                if (e.pointerType !== "mouse") {
+                  e.preventDefault();
+                  ensureAudio();
+                }
+              }}
               title={isReady ? "Audio ready" : "Tap to start audio"}
               tabIndex={isReady || isInitializing ? -1 : 0}
               className={`w-2 h-2 rounded-full shrink-0 power-indicator focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-card ${
@@ -337,6 +343,12 @@ export function LaeliaSynth() {
                 <button
                   key={`${note}-${i}`}
                   onClick={() => handleRemoveActiveNote(note)}
+                  onPointerDown={(e) => {
+                    if (e.pointerType !== "mouse") {
+                      e.preventDefault();
+                      handleRemoveActiveNote(note);
+                    }
+                  }}
                   className={`cursor-pointer hover:opacity-60 active:scale-90 transition-all ${
                     mode === "poly"
                       ? "text-cyan-400"

@@ -101,6 +101,12 @@ export function LandscapeLayout({
               <button
                 type="button"
                 onClick={() => ensureAudio()}
+                onPointerDown={(e) => {
+                  if (e.pointerType !== "mouse") {
+                    e.preventDefault();
+                    ensureAudio();
+                  }
+                }}
                 title={isReady ? "Audio ready" : "Tap to start audio"}
                 tabIndex={isReady || isInitializing ? -1 : 0}
                 className={`w-2 h-2 rounded-full shrink-0 power-indicator focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-card ${
@@ -152,6 +158,12 @@ export function LandscapeLayout({
                 <button
                   key={`${note}-${i}`}
                   onClick={() => handleRemoveActiveNote(note)}
+                  onPointerDown={(e) => {
+                    if (e.pointerType !== "mouse") {
+                      e.preventDefault();
+                      handleRemoveActiveNote(note);
+                    }
+                  }}
                   className={`
                     cursor-pointer hover:opacity-60 active:scale-90 transition-all px-0.5
                     ${
@@ -176,6 +188,12 @@ export function LandscapeLayout({
         {/* Settings toggle button */}
         <button
           onClick={() => setIsControlsOpen(!isControlsOpen)}
+          onPointerDown={(e) => {
+            if (e.pointerType !== "mouse") {
+              e.preventDefault();
+              setIsControlsOpen((open) => !open);
+            }
+          }}
           className={`
             synth-button p-1.5 shrink-0 transition-all
             ${isControlsOpen ? "bg-primary text-primary-foreground" : ""}

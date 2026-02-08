@@ -30,6 +30,12 @@ export function ModeButton({ label, isActive, onClick, colorVariant = 'primary',
   return (
     <button
       onClick={onClick}
+      onPointerDown={(e) => {
+        if (e.pointerType !== 'mouse') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       className={cn(
         'synth-button uppercase tracking-wider select-none',
         'flex items-center justify-center',

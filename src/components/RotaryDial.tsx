@@ -28,6 +28,8 @@ export function RotaryDial({
   const [isDragging, setIsDragging] = useState(false);
   const startY = useRef(0);
   const startValue = useRef(0);
+  /** Track which touch we're dragging with so multi-touch (e.g. keyboard + dial) works */
+  const activeTouchId = useRef<number | null>(null);
 
   const sizeClasses = { xs: 'w-8 h-8', sm: 'w-12 h-12', md: 'w-16 h-16', lg: 'w-20 h-20' };
   const indicatorSizes = { xs: 'w-0.5 h-1.5', sm: 'w-1 h-2', md: 'w-1.5 h-3', lg: 'w-2 h-4' };
@@ -42,9 +44,12 @@ export function RotaryDial({
   }, [value]);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    setIsDragging(true);
-    startY.current = e.touches[0].clientY;
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    activeTouchId.current = touch.identifier;
+    startY.current = touch.clientY;
     startValue.current = value;
+    setIsDragging(true);
   }, [value]);
 
   useEffect(() => {
@@ -57,26 +62,38 @@ export function RotaryDial({
       onChange(newValue);
     };
     const handleTouchMove = (e: TouchEvent) => {
-      if (!isDragging) return;
-      const deltaY = startY.current - e.touches[0].clientY;
+      if (!isDragging || activeTouchId.current === null) return;
+      const touch = Array.from(e.touches).find((t) => t.identifier === activeTouchId.current);
+      if (!touch) return;
+      const deltaY = startY.current - touch.clientY;
       const sensitivity = (max - min) / 150;
       let newValue = Math.max(min, Math.min(max, startValue.current + deltaY * sensitivity));
       newValue = Math.round(newValue / step) * step;
       onChange(newValue);
     };
-    const handleMouseUp = () => setIsDragging(false);
+    const handleMouseUp = () => {
+      activeTouchId.current = null;
+      setIsDragging(false);
+    };
+    const handleTouchEnd = (e: TouchEvent) => {
+      const ended = Array.from(e.changedTouches).some((t) => t.identifier === activeTouchId.current);
+      if (ended) {
+        activeTouchId.current = null;
+        setIsDragging(false);
+      }
+    };
 
     if (isDragging) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
-      window.addEventListener('touchmove', handleTouchMove);
-      window.addEventListener('touchend', handleMouseUp);
+      window.addEventListener('touchmove', handleTouchMove, { passive: false });
+      window.addEventListener('touchend', handleTouchEnd);
     }
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleMouseUp);
+      window.removeEventListener('touchend', handleTouchEnd);
     };
   }, [isDragging, min, max, step, onChange]);
 

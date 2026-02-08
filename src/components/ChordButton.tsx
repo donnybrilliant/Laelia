@@ -28,6 +28,12 @@ export function ChordButton({
   return (
     <button
       onClick={onClick}
+      onPointerDown={(e) => {
+        if (e.pointerType !== 'mouse') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       className={cn(
         "synth-button select-none",
         "flex items-center justify-center",
