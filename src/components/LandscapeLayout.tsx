@@ -12,6 +12,7 @@ import { Visualizer } from "./Visualizer";
 
 interface LandscapeLayoutProps {
   isReady: boolean;
+  isInitializing: boolean;
   currentChord: string;
   pressedKeys: Set<number>;
   activeNotes: Array<{ note: string; mode: PerformanceMode }>;
@@ -40,11 +41,11 @@ interface LandscapeLayoutProps {
   handleNoteOn: (note: number) => void;
   handleNoteOff: (note: number) => void;
   getPresetName: () => string;
-  triggerAudioInit: () => void;
 }
 
 export function LandscapeLayout({
   isReady,
+  isInitializing,
   currentChord,
   pressedKeys,
   activeNotes,
@@ -73,7 +74,6 @@ export function LandscapeLayout({
   handleNoteOn,
   handleNoteOff,
   getPresetName,
-  triggerAudioInit,
 }: LandscapeLayoutProps) {
   const [isControlsOpen, setIsControlsOpen] = useState(false);
 
@@ -96,8 +96,18 @@ export function LandscapeLayout({
           <div className="relative flex items-center justify-between w-full z-10">
             {/* Left side: status + chord */}
             <div className="flex items-center gap-2">
-              <div
-                className={`w-2 h-2 rounded-full shrink-0 ${isReady ? "bg-primary animate-pulse-glow" : "bg-muted-foreground"}`}
+              <button
+                type="button"
+                onClick={() => ensureAudio()}
+                title={isReady ? "Audio ready" : "Tap to start audio"}
+                tabIndex={isReady || isInitializing ? -1 : 0}
+                className={`w-2 h-2 rounded-full shrink-0 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-card ${
+                  isInitializing
+                    ? "bg-primary animate-power-on cursor-default"
+                    : isReady
+                      ? "bg-primary animate-pulse-glow cursor-default"
+                      : "bg-muted-foreground hover:bg-muted-foreground/80 cursor-pointer"
+                }`}
               />
               {/* Fixed-width chord display to prevent layout shift - longest chord is like "D#sus4maj796" */}
               <div className="synth-display-text text-base font-display font-bold w-[110px]">
@@ -169,6 +179,7 @@ export function LandscapeLayout({
             ${isControlsOpen ? "bg-primary text-primary-foreground" : ""}
           `}
           aria-label="Toggle controls"
+          aria-expanded={isControlsOpen}
         >
           <svg
             className={`w-5 h-5 transition-transform ${isControlsOpen ? "rotate-180" : ""}`}
@@ -186,8 +197,9 @@ export function LandscapeLayout({
         </button>
       </div>
 
-      {/* Pulldown controls sheet */}
+      {/* Pulldown controls sheet - inert when closed so controls are skipped when tabbing */}
       <div
+        inert={!isControlsOpen}
         className={`
           overflow-hidden transition-all duration-300 ease-in-out shrink-0
           ${isControlsOpen ? "max-h-[200px] opacity-100" : "max-h-0 opacity-0"}
@@ -374,7 +386,6 @@ export function LandscapeLayout({
           onNoteOn={handleNoteOn}
           onNoteOff={handleNoteOff}
           activeNotes={pressedKeys}
-          onFirstInteraction={triggerAudioInit}
         />
       </div>
     </div>

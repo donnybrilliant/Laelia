@@ -46,7 +46,7 @@ export interface SynthState {
 
 class AudioEngine {
   private synth: Tone.PolySynth | null = null;
-  private bassSynth: Tone.PolySynth | null = null;
+  private bassSynth: Tone.Synth | null = null;
   private reverb: Tone.Reverb | null = null;
   private delay: Tone.FeedbackDelay | null = null;
   private chorus: Tone.Chorus | null = null;
@@ -56,16 +56,17 @@ class AudioEngine {
   private analyser: Tone.Analyser | null = null;
   private initialized = false;
   private arpInterval: ReturnType<typeof setInterval> | null = null;
-  /** Note currently sounding in arp mode; used so we release the right note when the list shrinks. */
+  private arpIndex = 0;
   private currentArpNote: string | null = null;
+  private currentBassNote: string | null = null;
   private currentChordNotes: string[] = [];
   private activeNotesModes: Map<string, PerformanceMode> = new Map();
-  /** Per-key voice tracking for true polyphony: key index → chord notes + bass note + whether notes auto-release */
-  private activeVoices: Map<number, { notes: string[]; bassNote: string; autoRelease: boolean }> = new Map();
-  /** Reference count for each sounding note - only release when count reaches 0 */
-  private noteRefCount: Map<string, number> = new Map();
-  /** Reference count for each sounding bass note */
-  private bassRefCount: Map<string, number> = new Map();
+  /** Track notes per key index for proper cleanup when switching chords */
+  private activeVoices: Map<number, { notes: string[]; bassNote: string }> = new Map();
+  /** For arp mode: the full sequence of notes to arpeggiate (sorted, deduplicated from all held keys) */
+  private arpSequence: string[] = [];
+  /** For arp mode: notes we're transitioning TO (for smooth scale transitions) */
+  private arpTransitionQueue: string[] = [];
 
   state: SynthState = {
     volume: 0.7,
@@ -98,18 +99,15 @@ class AudioEngine {
       this.tremolo = new Tone.Tremolo({ frequency: 4, depth: 0.6, wet: 0 }).connect(this.phaser).start();
       this.distortion = new Tone.Distortion({ distortion: 0.1, wet: 0 }).connect(this.tremolo);
 
-      // Set maxPolyphony high enough to handle multiple chords (each chord has ~4-6 notes)
       this.synth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: 'triangle' },
         envelope: { attack: 0.02, decay: 0.3, sustain: 0.4, release: 1.2 },
       }).connect(this.distortion);
-      this.synth.maxPolyphony = 64;
 
-      this.bassSynth = new Tone.PolySynth(Tone.Synth, {
+      this.bassSynth = new Tone.Synth({
         oscillator: { type: 'triangle' },
         envelope: { attack: 0.02, decay: 0.2, sustain: 0.5, release: 0.8 },
       }).connect(this.distortion);
-      this.bassSynth.maxPolyphony = 16;
 
       this.updateVolume(this.state.volume);
       this.initialized = true;
@@ -186,10 +184,99 @@ class AudioEngine {
       clearInterval(this.arpInterval);
       this.arpInterval = null;
     }
+    // Release the currently-playing arp note to prevent stuck notes
     if (this.currentArpNote && this.synth) {
       this.synth.triggerRelease(this.currentArpNote, Tone.now());
+      this.currentArpNote = null;
     }
-    this.currentArpNote = null;
+    this.arpIndex = 0;
+    this.arpSequence = [];
+    this.arpTransitionQueue = [];
+  }
+
+  /** Convert note string to MIDI number for sorting */
+  private noteToMidi(note: string): number {
+    const match = note.match(/^([A-G]#?)(\d+)$/);
+    if (!match) return 0;
+    const [, noteName, octaveStr] = match;
+    const noteIndex = NOTE_NAMES.indexOf(noteName);
+    return (parseInt(octaveStr) + 1) * 12 + noteIndex;
+  }
+
+  /** Get all unique notes from all active voices, sorted by pitch */
+  private getAllArpNotes(): string[] {
+    const allNotes = new Set<string>();
+    for (const voice of this.activeVoices.values()) {
+      voice.notes.forEach(note => allNotes.add(note));
+    }
+    return Array.from(allNotes).sort((a, b) => this.noteToMidi(a) - this.noteToMidi(b));
+  }
+
+  /** Build transition notes from current arp position to new target sequence */
+  private buildArpTransition(currentNote: string, newSequence: string[]): string[] {
+    if (newSequence.length === 0) return [];
+
+    const currentMidi = this.noteToMidi(currentNote);
+
+    // Find the nearest note in the new sequence to transition to
+    let nearestIdx = 0;
+    let nearestDist = Infinity;
+    newSequence.forEach((note, i) => {
+      const dist = Math.abs(this.noteToMidi(note) - currentMidi);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearestIdx = i;
+      }
+    });
+
+    // Build a smooth transition: current position → nearest in new sequence
+    const targetMidi = this.noteToMidi(newSequence[nearestIdx]);
+    const transition: string[] = [];
+
+    // If we need to go up or down to reach the target, add intermediate notes
+    if (targetMidi > currentMidi) {
+      // Going up - add notes between current and target
+      for (const note of newSequence) {
+        const midi = this.noteToMidi(note);
+        if (midi > currentMidi && midi <= targetMidi) {
+          transition.push(note);
+        }
+      }
+    } else if (targetMidi < currentMidi) {
+      // Going down - add notes between target and current (in descending order)
+      const descending: string[] = [];
+      for (const note of newSequence) {
+        const midi = this.noteToMidi(note);
+        if (midi >= targetMidi && midi < currentMidi) {
+          descending.push(note);
+        }
+      }
+      transition.push(...descending.reverse());
+    }
+
+    return transition;
+  }
+
+  /** Update arp sequence when keys change - called from playNote and releaseVoice */
+  private updateArpSequence(): void {
+    if (this.state.performanceMode !== 'arp') return;
+
+    const newSequence = this.getAllArpNotes();
+
+    // If this is the first key or arp isn't running, just set the sequence
+    if (!this.arpInterval || this.arpSequence.length === 0) {
+      this.arpSequence = newSequence;
+      this.arpIndex = 0;
+      return;
+    }
+
+    // Build transition from current note to new sequence
+    if (this.currentArpNote && newSequence.length > 0) {
+      const transition = this.buildArpTransition(this.currentArpNote, newSequence);
+      this.arpTransitionQueue = transition;
+    }
+
+    this.arpSequence = newSequence;
   }
 
   private midiToNote(midi: number): string {
@@ -225,207 +312,189 @@ class AudioEngine {
     return `${rootNote}${typeName}${extName}`;
   }
 
-  /** Flatten all chord notes from active keys (for display/arp). */
-  private getAllActiveChordNotes(): string[] {
-    return Array.from(this.activeVoices.values()).flatMap((v) => v.notes);
-  }
-
   playNote(noteIndex: number): string {
     if (!this.isReady() || !this.synth || !this.bassSynth) return '';
-    
-    // Handle re-triggering a key that's already playing - release its notes first
-    const existing = this.activeVoices.get(noteIndex);
-    if (existing) {
-      this.releaseVoiceNotes(existing, noteIndex);
-    }
-    
+
+    // Release any existing notes from this key if re-triggering
+    this.releaseVoice(noteIndex);
+
     const t0 = Tone.now() + 0.01;
     this.state.currentNote = noteIndex;
     const rootMidi = 48 + noteIndex + this.state.key;
     const chordMidi = this.buildChord(rootMidi);
     const noteStrings = chordMidi.map((m) => this.midiToNote(m));
-    noteStrings.forEach((note) => this.activeNotesModes.set(note, this.state.performanceMode));
+    noteStrings.forEach(note => this.activeNotesModes.set(note, this.state.performanceMode));
 
     const bassOctave = 2 + Math.floor(this.state.bassVoicing * 2);
     const bassNote = `${NOTE_NAMES[rootMidi % 12]}${bassOctave}`;
-
-    // Determine if this mode auto-releases notes (strum/harp use triggerAttackRelease)
-    const autoRelease = this.state.performanceMode === 'strum' || this.state.performanceMode === 'harp';
-    
-    // Track all notes for this key (including octave-up for harp)
-    let allTrackedNotes = [...noteStrings];
-
-    // For bass: increment ref count, only trigger if first reference
-    const bassCount = this.bassRefCount.get(bassNote) || 0;
-    this.bassRefCount.set(bassNote, bassCount + 1);
-    if (bassCount === 0) {
-      this.bassSynth.triggerAttack(bassNote, t0);
+    // Release previous bass note before attacking new one (monophonic synth)
+    if (this.currentBassNote) {
+      this.bassSynth.triggerRelease(t0);
     }
+    this.currentBassNote = bassNote;
+    this.bassSynth.triggerAttack(bassNote, t0);
+
+    let trackedNotes = [...noteStrings];
 
     switch (this.state.performanceMode) {
       case 'poly':
-        // Increment ref count for each note, only trigger if first reference
-        noteStrings.forEach((note) => {
-          const count = this.noteRefCount.get(note) || 0;
-          this.noteRefCount.set(note, count + 1);
-          if (count === 0) {
-            this.synth!.triggerAttack(note, t0);
-          }
-        });
+        this.synth.triggerAttack(noteStrings, t0);
         break;
+
       case 'strum': {
-        this.stopArp();
-        const strumPreset = SOUND_PRESETS[this.state.sound % SOUND_PRESETS.length];
-        // Strum mode doesn't need ref counting since it auto-releases
+        // Strum: play notes with staggered timing, sustain while held
         noteStrings.forEach((note, i) => {
-          this.synth?.triggerAttackRelease(note, strumPreset.release + 1.0, t0 + i * 0.05);
+          this.synth?.triggerAttack(note, t0 + i * 0.05);
         });
         break;
       }
+
       case 'arp': {
-        this.stopArp();
-        // Arp mode manages its own note triggering
-        const allArpNotes = this.getAllActiveChordNotes();
-        if (allArpNotes.length > 0) {
-          this.currentArpNote = allArpNotes[0];
-          this.synth.triggerAttack(allArpNotes[0], t0);
-        }
-        this.arpInterval = setInterval(() => {
-          const allNotes = this.getAllActiveChordNotes();
-          if (this.synth && allNotes.length > 0) {
-            const now = Tone.now() + 0.01;
-            if (this.currentArpNote) this.synth.triggerRelease(this.currentArpNote, now);
-            const currentIndex = this.currentArpNote ? allNotes.indexOf(this.currentArpNote) : -1;
-            const nextIndex =
-              currentIndex >= 0
-                ? (currentIndex + 1) % allNotes.length
-                : 0;
-            this.currentArpNote = allNotes[nextIndex];
-            this.synth.triggerAttack(this.currentArpNote, now);
-          } else {
-            this.currentArpNote = null;
+        // Track this voice first so updateArpSequence sees it
+        this.activeVoices.set(noteIndex, { notes: trackedNotes, bassNote });
+
+        const isFirstKey = this.activeVoices.size === 1;
+
+        if (isFirstKey) {
+          // First key - start the arpeggiator
+          this.arpSequence = this.getAllArpNotes();
+          this.arpIndex = 0;
+
+          if (this.arpSequence.length > 0) {
+            this.currentArpNote = this.arpSequence[0];
+            this.synth.triggerAttack(this.currentArpNote, t0);
           }
-        }, 60000 / this.state.bpm / 2);
-        break;
+
+          this.arpInterval = setInterval(() => {
+            if (!this.synth) return;
+
+            const now = Tone.now() + 0.01;
+
+            // Release current note
+            if (this.currentArpNote) {
+              this.synth.triggerRelease(this.currentArpNote, now);
+            }
+
+            // Check if we have transition notes to play first
+            if (this.arpTransitionQueue.length > 0) {
+              this.currentArpNote = this.arpTransitionQueue.shift()!;
+              this.synth.triggerAttack(this.currentArpNote, now);
+              return;
+            }
+
+            // Normal arp progression
+            if (this.arpSequence.length > 0) {
+              this.arpIndex = (this.arpIndex + 1) % this.arpSequence.length;
+              this.currentArpNote = this.arpSequence[this.arpIndex];
+              this.synth.triggerAttack(this.currentArpNote, now);
+            }
+          }, 60000 / this.state.bpm / 2);
+        } else {
+          // Additional key - update the sequence with smooth transition
+          this.updateArpSequence();
+        }
+
+        // Update display notes and return early (we already set activeVoices)
+        this.currentChordNotes = Array.from(this.activeVoices.values()).flatMap(v => v.notes);
+        return this.getChordName(rootMidi);
       }
+
       case 'harp': {
-        this.stopArp();
-        // Add octave-up notes for harp mode - auto-releases so no ref counting needed
+        // Harp: play notes with staggered timing including octave up, sustain while held
         const octaveUpNotes = chordMidi.map((m) => this.midiToNote(m + 12));
-        allTrackedNotes = [...noteStrings, ...octaveUpNotes];
-        octaveUpNotes.forEach((note) => this.activeNotesModes.set(note, 'harp'));
-        const preset = SOUND_PRESETS[this.state.sound % SOUND_PRESETS.length];
-        allTrackedNotes.forEach((note, i) => this.synth?.triggerAttackRelease(note, preset.release + 0.5, t0 + i * 0.03));
+        trackedNotes = [...noteStrings, ...octaveUpNotes];
+        octaveUpNotes.forEach(note => this.activeNotesModes.set(note, 'harp'));
+        trackedNotes.forEach((note, i) => {
+          this.synth?.triggerAttack(note, t0 + i * 0.03);
+        });
         break;
       }
     }
-    
-    // Store voice tracking with all notes (including harp octave-up notes)
-    this.activeVoices.set(noteIndex, { notes: allTrackedNotes, bassNote, autoRelease });
-    this.currentChordNotes = this.getAllActiveChordNotes();
+
+    // Track this voice's notes for proper cleanup
+    this.activeVoices.set(noteIndex, { notes: trackedNotes, bassNote });
+
+    // Update currentChordNotes to include all active voice notes (for display)
+    this.currentChordNotes = Array.from(this.activeVoices.values()).flatMap(v => v.notes);
 
     return this.getChordName(rootMidi);
   }
 
-  /** Release notes for a voice entry - decrement ref counts and release when zero */
-  private releaseVoiceNotes(entry: { notes: string[]; bassNote: string; autoRelease: boolean }, _voiceIndex: number): void {
-    if (!this.synth || !this.bassSynth) return;
+  /** Release notes for a specific voice/key (internal use) */
+  private releaseVoice(noteIndex: number): void {
+    const voice = this.activeVoices.get(noteIndex);
+    if (!voice) return;
+
     const now = Tone.now();
-    
-    // Only release synth notes if they weren't auto-released (strum/harp auto-release)
-    if (!entry.autoRelease) {
-      entry.notes.forEach((note) => {
-        const count = this.noteRefCount.get(note) || 0;
-        if (count <= 1) {
-          // Last voice using this note - actually release it
-          this.noteRefCount.delete(note);
-          this.synth!.triggerRelease(note, now);
-        } else {
-          // Other voices still need this note - just decrement
-          this.noteRefCount.set(note, count - 1);
-        }
-      });
+
+    // Release all notes from this voice
+    voice.notes.forEach(note => {
+      this.synth?.triggerRelease(note, now);
+      this.activeNotesModes.delete(note);
+    });
+
+    this.activeVoices.delete(noteIndex);
+
+    // Update arp sequence if in arp mode and there are still keys held
+    if (this.state.performanceMode === 'arp' && this.activeVoices.size > 0) {
+      this.updateArpSequence();
     }
     
-    // Decrement bass ref count, release if last reference
-    const bassCount = this.bassRefCount.get(entry.bassNote) || 0;
-    if (bassCount <= 1) {
-      this.bassRefCount.delete(entry.bassNote);
-      this.bassSynth.triggerRelease(entry.bassNote, now);
-    } else {
-      this.bassRefCount.set(entry.bassNote, bassCount - 1);
-    }
-    
-    // Clean up mode tracking
-    entry.notes.forEach((note) => this.activeNotesModes.delete(note));
+    // Update display
+    this.currentChordNotes = Array.from(this.activeVoices.values()).flatMap(v => v.notes);
   }
 
-  releaseNote(noteIndex: number): void {
+  /** Release a specific key's voice - called when a key is released but others remain held */
+  releaseKey(noteIndex: number): void {
     if (!this.synth || !this.bassSynth) return;
-    const entry = this.activeVoices.get(noteIndex);
-    if (!entry) return;
     
-    // Release notes, passing the voice index so we can check if other voices need them
-    this.releaseVoiceNotes(entry, noteIndex);
+    const voice = this.activeVoices.get(noteIndex);
+    if (!voice) return;
+
+    // Release the voice
+    this.releaseVoice(noteIndex);
     
-    this.activeVoices.delete(noteIndex);
-    this.currentChordNotes = this.getAllActiveChordNotes();
-    if (this.activeVoices.size === 0) this.state.currentNote = -1;
-    if (this.state.performanceMode === 'arp' && this.activeVoices.size === 0) this.stopArp();
+    // If no more voices, stop everything
+    if (this.activeVoices.size === 0) {
+      this.stopArp();
+      this.bassSynth.triggerRelease(Tone.now());
+      this.currentBassNote = null;
+      this.state.currentNote = -1;
+    }
+  }
+
+  releaseNote(): void {
+    if (!this.synth || !this.bassSynth) return;
+    this.stopArp();
+    const now = Tone.now();
+    this.synth.releaseAll(now);
+    this.bassSynth.triggerRelease(now);
+    this.currentBassNote = null;
+    this.currentChordNotes = [];
+    this.activeNotesModes.clear();
+    this.activeVoices.clear();
+    this.state.currentNote = -1;
   }
 
   releaseSpecificNote(noteToRelease: string): void {
-    if (!this.synth || !this.bassSynth) return;
-    
-    // Force release the note regardless of ref count (user explicitly removing it)
-    this.noteRefCount.delete(noteToRelease);
+    if (!this.synth) return;
     this.synth.triggerRelease(noteToRelease, Tone.now());
-    
     this.activeNotesModes.delete(noteToRelease);
-    for (const [keyIndex, entry] of this.activeVoices.entries()) {
-      if (entry.notes.includes(noteToRelease)) {
-        entry.notes = entry.notes.filter((n) => n !== noteToRelease);
-        if (entry.notes.length === 0) {
-          // Force release bass too since this voice has no notes left
-          const bassCount = this.bassRefCount.get(entry.bassNote) || 0;
-          if (bassCount <= 1) {
-            this.bassRefCount.delete(entry.bassNote);
-            this.bassSynth.triggerRelease(entry.bassNote, Tone.now());
-          } else {
-            this.bassRefCount.set(entry.bassNote, bassCount - 1);
-          }
-          this.activeVoices.delete(keyIndex);
-        }
+
+    // Remove from voice tracking
+    for (const [keyIndex, voice] of this.activeVoices.entries()) {
+      voice.notes = voice.notes.filter(n => n !== noteToRelease);
+      if (voice.notes.length === 0) {
+        this.activeVoices.delete(keyIndex);
       }
     }
-    this.currentChordNotes = this.getAllActiveChordNotes();
-  }
 
-  /** Release ALL notes immediately - panic button for stuck notes */
-  releaseAll(): void {
-    if (!this.synth || !this.bassSynth) return;
-    const now = Tone.now();
-    
-    // Release all tracked notes
-    for (const note of this.noteRefCount.keys()) {
-      this.synth.triggerRelease(note, now);
+    // Update arp sequence if needed
+    if (this.state.performanceMode === 'arp' && this.activeVoices.size > 0) {
+      this.updateArpSequence();
     }
-    for (const bassNote of this.bassRefCount.keys()) {
-      this.bassSynth.triggerRelease(bassNote, now);
-    }
-    
-    // Also release any notes Tone.js might still have (belt and suspenders)
-    this.synth.releaseAll(now);
-    this.bassSynth.releaseAll(now);
-    
-    // Clear all tracking state
-    this.noteRefCount.clear();
-    this.bassRefCount.clear();
-    this.activeVoices.clear();
-    this.activeNotesModes.clear();
-    this.currentChordNotes = [];
-    this.state.currentNote = -1;
-    this.stopArp();
+
+    this.currentChordNotes = Array.from(this.activeVoices.values()).flatMap(v => v.notes);
   }
 
   getPresetName(): string {
@@ -443,9 +512,8 @@ class AudioEngine {
 
   getActiveNotes(): Array<{ note: string; mode: PerformanceMode }> {
     if (!this.synth) return [];
-    type VoiceLike = { envelope: { value: number }; frequency: { value: number } };
-    const synthWithVoices = this.synth as unknown as { _voices?: VoiceLike[] };
-    const voices = synthWithVoices._voices;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const voices = (this.synth as any)._voices as Tone.Synth[] | undefined;
     if (!voices) {
       return this.currentChordNotes.map(note => ({
         note,
@@ -454,7 +522,7 @@ class AudioEngine {
     }
     const activeNotes: Array<{ note: string; mode: PerformanceMode }> = [];
     const seenNotes = new Set<string>();
-    voices.forEach((voice: VoiceLike) => {
+    voices.forEach((voice: Tone.Synth) => {
       const env = voice.envelope;
       if (env && env.value > 0.01) {
         const note = Tone.Frequency(voice.frequency.value).toNote();

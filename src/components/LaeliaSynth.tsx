@@ -17,6 +17,7 @@ import { useLandscapeMobile } from "@/hooks/use-landscape-mobile";
 export function LaeliaSynth() {
   const isLandscapeMobile = useLandscapeMobile();
   const [isReady, setIsReady] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
   const [currentChord, setCurrentChord] = useState("");
   const [pressedKeys, setPressedKeys] = useState<Set<number>>(new Set()); // Keyboard keys currently pressed
   const [activeNotes, setActiveNotes] = useState<
@@ -47,19 +48,29 @@ export function LaeliaSynth() {
   const ensureAudio = useCallback(async () => {
     unlockAudio();
     if (!isReady) {
+      setIsInitializing(true);
+      // Yield to let React paint the initializing state before we block on ensureReady.
+      await new Promise((r) => requestAnimationFrame(r));
+      const start = Date.now();
       const success = await audioEngine.ensureReady();
       if (success) setIsReady(true);
+      // Keep power-on visible for at least 600ms so the glow/grow is noticeable
+      const elapsed = Date.now() - start;
+      if (elapsed < 600) {
+        await new Promise((r) => setTimeout(r, 600 - elapsed));
+      }
+      setIsInitializing(false);
       return success;
     }
     return true;
   }, [isReady, unlockAudio]);
 
-  // Eagerly initialize audio on first user interaction
-  // Called by Keyboard on first touch/key, and by other UI elements
+  // Eagerly initialize audio on first user interaction (non-blocking)
+  // Called synchronously to avoid race conditions with note events
   const triggerAudioInit = useCallback(() => {
     if (initStartedRef.current) return;
     initStartedRef.current = true;
-    ensureAudio();
+    ensureAudio(); // Fire and forget - don't await
   }, [ensureAudio]);
 
   const toggleExtension = (ext: "6" | "m7" | "M7" | "9") => {
@@ -138,42 +149,39 @@ export function LaeliaSynth() {
 
   const handleNoteOn = useCallback(
     (note: number) => {
-      // Always update pressedKeys for visual feedback
+      // Trigger audio init on first interaction (non-blocking)
+      triggerAudioInit();
+      
+      // Always update visual state immediately
       setPressedKeys((prev) => new Set(prev).add(note));
       
-      // Only play audio if engine is ready
-      if (!isReady) return;
+      // Only play audio if engine is ready (avoid race conditions)
+      if (!audioEngine.isReady()) return;
       
       const chordName = audioEngine.playNote(note);
       setCurrentChord(chordName);
     },
-    [isReady],
+    [triggerAudioInit],
   );
 
   const handleNoteOff = useCallback((note: number) => {
-    // Track if we're releasing all notes (to avoid redundant releaseNote call)
-    let releasedAll = false;
-    
-    // Always update pressedKeys for visual feedback
     setPressedKeys((prev) => {
       const next = new Set(prev);
       next.delete(note);
+      
       if (next.size === 0) {
+        // All keys released - full release
+        audioEngine.releaseNote();
         setCurrentChord("");
-        // Defensive: when all UI keys are released, ensure audio is fully silent
-        // This catches any desync between UI state and audio engine
-        if (isReady) {
-          audioEngine.releaseAll();
-          releasedAll = true;
-        }
+      } else {
+        // Individual key released - release just that voice
+        // This is important for arp mode to update its sequence
+        audioEngine.releaseKey(note);
       }
+      
       return next;
     });
-    
-    // Only release individual note if we didn't already release all
-    if (!isReady || releasedAll) return;
-    audioEngine.releaseNote(note);
-  }, [isReady]);
+  }, []);
 
   const handleRemoveActiveNote = useCallback((note: string) => {
     audioEngine.releaseSpecificNote(note);
@@ -184,6 +192,7 @@ export function LaeliaSynth() {
     return (
       <LandscapeLayout
         isReady={isReady}
+        isInitializing={isInitializing}
         currentChord={currentChord}
         pressedKeys={pressedKeys}
         activeNotes={activeNotes}
@@ -212,7 +221,6 @@ export function LaeliaSynth() {
         handleNoteOn={handleNoteOn}
         handleNoteOff={handleNoteOff}
         getPresetName={() => audioEngine.getPresetName()}
-        triggerAudioInit={triggerAudioInit}
       />
     );
   }
@@ -222,8 +230,18 @@ export function LaeliaSynth() {
       <div className="synth-panel w-full max-w-4xl flex flex-col p-3 sm:p-4 md:p-6 gap-3 sm:gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div
-              className={`w-2 h-2 rounded-full ${isReady ? "bg-primary animate-pulse-glow" : "bg-muted-foreground"}`}
+            <button
+              type="button"
+              onClick={() => ensureAudio()}
+              title={isReady ? "Audio ready" : "Tap to start audio"}
+              tabIndex={isReady || isInitializing ? -1 : 0}
+              className={`w-2 h-2 rounded-full shrink-0 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-card ${
+                isInitializing
+                  ? "bg-primary animate-power-on cursor-default"
+                  : isReady
+                    ? "bg-primary animate-pulse-glow cursor-default"
+                    : "bg-muted-foreground hover:bg-muted-foreground/80 cursor-pointer"
+              }`}
             />
             <h1 className="font-display text-lg sm:text-xl font-bold tracking-wider text-foreground">
               LAELIA
@@ -448,7 +466,6 @@ export function LaeliaSynth() {
                   onNoteOn={handleNoteOn}
                   onNoteOff={handleNoteOff}
                   activeNotes={pressedKeys}
-                  onFirstInteraction={triggerAudioInit}
                 />
               </div>
             </div>

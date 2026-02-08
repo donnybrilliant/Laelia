@@ -80,12 +80,30 @@ export function RotaryDial({
     };
   }, [isDragging, min, max, step, onChange]);
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const stepAmount = (max - min) * 0.05;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      onChange(Math.min(max, Math.round((value + stepAmount) / step) * step));
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      onChange(Math.max(min, Math.round((value - stepAmount) / step) * step));
+    }
+  }, [value, min, max, step, onChange]);
+
   return (
     <div className={cn('flex flex-col items-center gap-2', className)}>
       <div
         ref={dialRef}
+        role="slider"
+        tabIndex={0}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        aria-label={label}
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
+        onKeyDown={handleKeyDown}
         className={cn('synth-dial flex items-center justify-center', sizeClasses[size], isDragging && 'ring-2 ring-primary/50')}
         style={{ touchAction: 'none' }}
       >
