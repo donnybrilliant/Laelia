@@ -1,40 +1,41 @@
-import { cn } from '@/lib/utils';
+import { cn } from "@/lib/utils";
 
-type ButtonSize = 'xs' | 'sm' | 'md';
+type ButtonSize = "xs" | "sm" | "md";
 
 interface ChordButtonProps {
   label: string;
   isActive: boolean;
   onClick: () => void;
-  variant?: 'type' | 'extension';
+  variant?: "type" | "extension";
   size?: ButtonSize;
   className?: string;
 }
 
 const sizeClasses: Record<ButtonSize, string> = {
-  xs: 'px-1.5 py-1 min-w-[28px] text-[10px]',
-  sm: 'px-2 py-1.5 min-w-[40px] text-xs',
-  md: 'px-3 py-2 min-w-[48px] text-sm',
+  xs: "px-1.5 py-1 min-w-[28px] text-[10px]",
+  sm: "px-2 py-1.5 min-w-[40px] text-xs",
+  md: "px-3 py-2 min-w-[48px] text-sm",
 };
 
 export function ChordButton({
   label,
   isActive,
   onClick,
-  variant = 'type',
-  size = 'md',
+  variant = "type",
+  size = "md",
   className,
 }: ChordButtonProps) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        'synth-button select-none',
-        'flex items-center justify-center',
+        "synth-button select-none",
+        "flex items-center justify-center",
         sizeClasses[size],
-        isActive && 'bg-primary text-primary-foreground shadow-[0_0_16px_hsl(var(--synth-glow)/0.4)]',
-        variant === 'extension' && size !== 'xs' && 'text-xs',
-        className
+        isActive &&
+          "bg-primary text-primary-foreground shadow-[0_0_16px_hsl(var(--synth-glow)/0.4)]",
+        variant === "extension" && size !== "xs" && "text-xs",
+        className,
       )}
     >
       <span className="font-mono font-semibold">{label}</span>

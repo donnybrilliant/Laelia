@@ -87,8 +87,8 @@ export function LandscapeLayout({
         <div className="synth-display relative flex items-center px-3 py-1.5 flex-1 min-w-0 min-h-[40px] overflow-hidden">
           {/* Visualizer background */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-50">
-            <Visualizer 
-              isActive={isReady} 
+            <Visualizer
+              isActive={isReady}
               hasActiveNotes={activeNotes.length > 0}
               performanceMode={performanceMode}
             />
@@ -103,9 +103,9 @@ export function LandscapeLayout({
                 onClick={() => ensureAudio()}
                 title={isReady ? "Audio ready" : "Tap to start audio"}
                 tabIndex={isReady || isInitializing ? -1 : 0}
-                className={`w-2 h-2 rounded-full shrink-0 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-card ${
+                className={`w-2 h-2 rounded-full shrink-0 power-indicator focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-card ${
                   isInitializing
-                    ? "bg-primary animate-power-on cursor-default"
+                    ? "power-on-indicator animate-power-on cursor-default"
                     : isReady
                       ? "bg-primary animate-pulse-glow cursor-default"
                       : "bg-muted-foreground hover:bg-muted-foreground/80 cursor-pointer"
@@ -294,7 +294,7 @@ export function LandscapeLayout({
             {/* Performance modes */}
             <div className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-                Performance
+                Performance (1-4)
               </span>
               <div className="flex gap-1">
                 {PERFORMANCE_MODES.map((mode) => (
@@ -320,7 +320,7 @@ export function LandscapeLayout({
             {/* Chord types */}
             <div className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-                Chord Type
+                Chord Type (5-8)
               </span>
               <div className="flex gap-1">
                 <ChordButton
@@ -349,7 +349,7 @@ export function LandscapeLayout({
             {/* Extensions */}
             <div className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-                Extensions
+                Extensions (9-=)
               </span>
               <div className="flex gap-1">
                 <ChordButton

@@ -31,24 +31,46 @@
   --font-mono: 'JetBrains Mono', monospace;
   --font-display: 'JetBrains Mono', monospace;
   --animate-pulse-glow: pulse-glow 2s ease-in-out infinite;
-  --animate-power-on: power-on 0.8s ease-in-out infinite;
+  --animate-power-on: power-on 1.2s ease-in-out forwards;
 }
 
 @keyframes pulse-glow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.power-on-indicator {
+  background-color: hsl(var(--power-on-green));
+}
+
+.power-indicator {
+  transition: background-color 0.3s ease, transform 0.5s ease-out, box-shadow 0.3s ease;
 }
 
 @keyframes power-on {
-  0%, 100% {
+  0% {
     opacity: 1;
     transform: scale(1);
-    box-shadow: 0 0 6px hsl(var(--synth-glow) / 0.6);
+    box-shadow: 0 0 6px hsl(var(--power-on-green) / 0.6);
   }
+
   50% {
     opacity: 1;
-    transform: scale(1.4);
-    box-shadow: 0 0 16px hsl(var(--synth-glow) / 0.9), 0 0 24px hsl(var(--synth-glow) / 0.5);
+    transform: scale(1.5);
+    box-shadow: 0 0 20px hsl(var(--power-on-green) / 0.9), 0 0 30px hsl(var(--power-on-green) / 0.6);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 6px hsl(var(--power-on-green) / 0.6);
   }
 }
 
@@ -66,6 +88,7 @@
   --synth-dial-indicator: 45 100% 55%;
   --synth-display: 220 25% 6%;
   --synth-display-text: 120 80% 55%;
+  --power-on-green: 145 70% 50%;
   --border: 220 15% 20%;
   --radius: 0.75rem;
 }
@@ -80,7 +103,9 @@
     @apply border-border;
   }
 
-  html, body, #root {
+  html,
+  body,
+  #root {
     @apply h-full overflow-hidden;
     user-select: none;
     -webkit-user-select: none;
@@ -108,7 +133,7 @@
   .synth-dial {
     @apply relative rounded-full cursor-ns-resize select-none;
     background: linear-gradient(145deg, hsl(var(--synth-dial)) 0%, hsl(220 15% 16%) 100%);
-    box-shadow: inset 0 2px 4px rgba(0,0,0,0.3), 0 4px 8px rgba(0,0,0,0.4), 0 0 0 2px hsl(var(--border));
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3), 0 4px 8px rgba(0, 0, 0, 0.4), 0 0 0 2px hsl(var(--border));
   }
 
   .synth-dial-indicator {
@@ -118,7 +143,7 @@
 
   .synth-button {
     @apply relative rounded-lg font-mono text-sm font-medium transition-all duration-150 bg-secondary border border-border text-secondary-foreground cursor-pointer active:scale-95;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
 
   @media (hover: hover) {
@@ -131,34 +156,34 @@
   .synth-key-white {
     @apply rounded-b-lg transition-all duration-75 cursor-pointer;
     background: linear-gradient(180deg, hsl(var(--synth-key-white)) 0%, hsl(210 15% 85%) 100%);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.3), inset 0 -2px 4px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3), inset 0 -2px 4px rgba(0, 0, 0, 0.1);
   }
 
   .synth-key-white:active,
   .synth-key-white.pressed {
     background: linear-gradient(180deg, hsl(var(--synth-key-pressed)) 0%, hsl(45 90% 50%) 100%);
-    box-shadow: 0 0 16px hsl(var(--synth-glow) / 0.5), 0 2px 4px rgba(0,0,0,0.3);
+    box-shadow: 0 0 16px hsl(var(--synth-glow) / 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
     transform: translateY(2px);
   }
 
   .synth-key-black {
     @apply rounded-b-md transition-all duration-75 cursor-pointer;
     background: linear-gradient(180deg, hsl(220 20% 18%) 0%, hsl(var(--synth-key-black)) 100%);
-    box-shadow: 0 4px 6px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
 
   .synth-key-black:active,
   .synth-key-black.pressed {
     background: linear-gradient(180deg, hsl(45 80% 45%) 0%, hsl(45 90% 35%) 100%);
-    box-shadow: 0 0 12px hsl(var(--synth-glow) / 0.4), 0 2px 3px rgba(0,0,0,0.4);
-    transform: scaleX(1.06);
+    box-shadow: 0 0 12px hsl(var(--synth-glow) / 0.4), 0 2px 3px rgba(0, 0, 0, 0.4);
+    transform: scaleY(1.01);
     transform-origin: top center;
   }
 
   .synth-display {
     @apply rounded-lg font-mono;
     background: hsl(var(--synth-display));
-    box-shadow: inset 0 2px 8px rgba(0,0,0,0.5), 0 0 0 1px hsl(var(--border));
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 0 1px hsl(var(--border));
   }
 
   .synth-display-text {

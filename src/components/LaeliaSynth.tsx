@@ -55,8 +55,9 @@ export function LaeliaSynth() {
       const success = await audioEngine.ensureReady();
       if (success) setIsReady(true);
       const elapsed = Date.now() - start;
-      if (elapsed < 600) {
-        await new Promise((r) => setTimeout(r, 600 - elapsed));
+      const minInitMs = 1400; // Let power-on animation complete full cycle (grow + grow back)
+      if (elapsed < minInitMs) {
+        await new Promise((r) => setTimeout(r, minInitMs - elapsed));
       }
       setIsInitializing(false);
       return success;
@@ -81,16 +82,65 @@ export function LaeliaSynth() {
     });
   };
 
+  // Physical key codes (layout-independent, like Keyboard)
+  // 1-4: Performance modes, 5-8: Chord type, 9-=: Extensions
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "1") setChordType("dim");
-      if (e.key === "2") setChordType("min");
-      if (e.key === "3") setChordType("maj");
-      if (e.key === "4") setChordType("sus");
-      if (e.key === "5") toggleExtension("6");
-      if (e.key === "6") toggleExtension("m7");
-      if (e.key === "7") toggleExtension("M7");
-      if (e.key === "8") toggleExtension("9");
+      let handled = false;
+      switch (e.code) {
+        // Performance modes (1-4)
+        case "Digit1":
+          setPerformanceMode("poly");
+          handled = true;
+          break;
+        case "Digit2":
+          setPerformanceMode("strum");
+          handled = true;
+          break;
+        case "Digit3":
+          setPerformanceMode("arp");
+          handled = true;
+          break;
+        case "Digit4":
+          setPerformanceMode("harp");
+          handled = true;
+          break;
+        // Chord type (5-8)
+        case "Digit5":
+          setChordType("dim");
+          handled = true;
+          break;
+        case "Digit6":
+          setChordType("min");
+          handled = true;
+          break;
+        case "Digit7":
+          setChordType("maj");
+          handled = true;
+          break;
+        case "Digit8":
+          setChordType("sus");
+          handled = true;
+          break;
+        // Extensions (9-=)
+        case "Digit9":
+          toggleExtension("6");
+          handled = true;
+          break;
+        case "Digit0":
+          toggleExtension("m7");
+          handled = true;
+          break;
+        case "Minus":
+          toggleExtension("M7");
+          handled = true;
+          break;
+        case "Equal":
+          toggleExtension("9");
+          handled = true;
+          break;
+      }
+      if (handled) e.preventDefault();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -150,13 +200,11 @@ export function LaeliaSynth() {
     (note: number) => {
       // Trigger audio init on first interaction (non-blocking)
       triggerAudioInit();
-      
-      // Always update visual state immediately
-      setPressedKeys((prev) => new Set(prev).add(note));
-      
-      // Only play audio if engine is ready (avoid race conditions)
+
+      // Only update visual state and play audio if engine is ready
       if (!audioEngine.isReady()) return;
-      
+
+      setPressedKeys((prev) => new Set(prev).add(note));
       const chordName = audioEngine.playNote(note);
       setCurrentChord(chordName);
     },
@@ -167,7 +215,7 @@ export function LaeliaSynth() {
     setPressedKeys((prev) => {
       const next = new Set(prev);
       next.delete(note);
-      
+
       if (next.size === 0) {
         // All keys released - full release
         audioEngine.releaseNote();
@@ -177,7 +225,7 @@ export function LaeliaSynth() {
         // This is important for arp mode to update its sequence
         audioEngine.releaseKey(note);
       }
-      
+
       return next;
     });
   }, []);
@@ -235,9 +283,9 @@ export function LaeliaSynth() {
               onClick={() => ensureAudio()}
               title={isReady ? "Audio ready" : "Tap to start audio"}
               tabIndex={isReady || isInitializing ? -1 : 0}
-              className={`w-2 h-2 rounded-full shrink-0 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-card ${
+              className={`w-2 h-2 rounded-full shrink-0 power-indicator focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-card ${
                 isInitializing
-                  ? "bg-primary animate-power-on cursor-default"
+                  ? "power-on-indicator animate-power-on cursor-default"
                   : isReady
                     ? "bg-primary animate-pulse-glow cursor-default"
                     : "bg-muted-foreground hover:bg-muted-foreground/80 cursor-pointer"
@@ -281,8 +329,8 @@ export function LaeliaSynth() {
               mode={performanceMode}
             />
             <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-lg opacity-60">
-              <Visualizer 
-                isActive={isReady} 
+              <Visualizer
+                isActive={isReady}
                 hasActiveNotes={activeNotes.length > 0}
                 performanceMode={performanceMode}
               />
@@ -354,7 +402,7 @@ export function LaeliaSynth() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="flex flex-col gap-2">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-                Performance
+                Performance (1-4)
               </span>
               <div className="grid grid-cols-4 gap-1">
                 {PERFORMANCE_MODES.map((mode) => (
@@ -378,7 +426,7 @@ export function LaeliaSynth() {
             </div>
             <div className="flex flex-col gap-2">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-                Chord Type (1-4)
+                Chord Type (5-8)
               </span>
               <div className="grid grid-cols-4 gap-1">
                 <ChordButton
@@ -405,7 +453,7 @@ export function LaeliaSynth() {
             </div>
             <div className="flex flex-col gap-2">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground text-center">
-                Extensions (5-8)
+                Extensions (9-=)
               </span>
               <div className="grid grid-cols-4 gap-1">
                 <ChordButton
