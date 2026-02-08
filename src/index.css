@@ -113,6 +113,15 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* Prevent double-tap zoom and weird touch behaviors on interactive elements */
+  .synth-key-white,
+  .synth-key-black,
+  .synth-button,
+  .synth-dial,
+  canvas {
+    touch-action: manipulation;
+  }
+
   .selectable-text {
     user-select: text;
     -webkit-user-select: text;

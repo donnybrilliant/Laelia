@@ -268,6 +268,15 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAud
     };
   }, [handleKeyDown, handleKeyUp]);
 
+  // Block Safari’s touch callout/magnifier on the keyboard (native listener needed; passive: false)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onTouchStart = (e: TouchEvent) => e.preventDefault();
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    return () => el.removeEventListener("touchstart", onTouchStart);
+  }, []);
+
   // Cleanup on unmount - release all held notes
   useEffect(() => {
     // Capture refs at effect time for cleanup
