@@ -67,6 +67,8 @@ class AudioEngine {
   private arpSequence: string[] = [];
   /** For arp mode: notes we're transitioning TO (for smooth scale transitions) */
   private arpTransitionQueue: string[] = [];
+  /** Scheduled strum/harp attack timeouts that can be cancelled */
+  private scheduledAttacks: ReturnType<typeof setTimeout>[] = [];
 
   state: SynthState = {
     volume: 0.7,
@@ -315,8 +317,21 @@ class AudioEngine {
   playNote(noteIndex: number): string {
     if (!this.isReady() || !this.synth || !this.bassSynth) return '';
 
-    // Release any existing notes from this key if re-triggering
-    this.releaseVoice(noteIndex);
+    // For non-arp modes, only one voice should play at a time (like a traditional synth)
+    if (this.state.performanceMode !== 'arp') {
+      // Cancel any scheduled strum/harp attacks that haven't happened yet
+      this.scheduledAttacks.forEach(timeout => clearTimeout(timeout));
+      this.scheduledAttacks = [];
+      
+      // Release all currently playing notes immediately
+      const now = Tone.now();
+      this.synth.releaseAll(now);
+      this.activeNotesModes.clear();
+      this.activeVoices.clear();
+    } else {
+      // For arp mode, only release this specific key if re-triggering
+      this.releaseVoice(noteIndex);
+    }
 
     const t0 = Tone.now() + 0.01;
     this.state.currentNote = noteIndex;
@@ -342,9 +357,15 @@ class AudioEngine {
         break;
 
       case 'strum': {
-        // Strum: play notes with staggered timing, sustain while held
-        noteStrings.forEach((note, i) => {
-          this.synth?.triggerAttack(note, t0 + i * 0.05);
+        // Strum: play notes with staggered timing using setTimeout (cancelable)
+        // First note plays immediately
+        this.synth.triggerAttack(noteStrings[0], t0);
+        // Subsequent notes are scheduled via setTimeout
+        noteStrings.slice(1).forEach((note, i) => {
+          const timeout = setTimeout(() => {
+            this.synth?.triggerAttack(note, Tone.now());
+          }, (i + 1) * 50); // 50ms stagger
+          this.scheduledAttacks.push(timeout);
         });
         break;
       }
@@ -400,12 +421,18 @@ class AudioEngine {
       }
 
       case 'harp': {
-        // Harp: play notes with staggered timing including octave up, sustain while held
+        // Harp: play notes with staggered timing including octave up, using setTimeout (cancelable)
         const octaveUpNotes = chordMidi.map((m) => this.midiToNote(m + 12));
         trackedNotes = [...noteStrings, ...octaveUpNotes];
         octaveUpNotes.forEach(note => this.activeNotesModes.set(note, 'harp'));
-        trackedNotes.forEach((note, i) => {
-          this.synth?.triggerAttack(note, t0 + i * 0.03);
+        // First note plays immediately
+        this.synth.triggerAttack(trackedNotes[0], t0);
+        // Subsequent notes are scheduled via setTimeout
+        trackedNotes.slice(1).forEach((note, i) => {
+          const timeout = setTimeout(() => {
+            this.synth?.triggerAttack(note, Tone.now());
+          }, (i + 1) * 30); // 30ms stagger
+          this.scheduledAttacks.push(timeout);
         });
         break;
       }
@@ -466,6 +493,9 @@ class AudioEngine {
   releaseNote(): void {
     if (!this.synth || !this.bassSynth) return;
     this.stopArp();
+    // Cancel any scheduled strum/harp attacks
+    this.scheduledAttacks.forEach(timeout => clearTimeout(timeout));
+    this.scheduledAttacks = [];
     const now = Tone.now();
     this.synth.releaseAll(now);
     this.bassSynth.triggerRelease(now);
@@ -540,6 +570,9 @@ class AudioEngine {
 
   dispose(): void {
     this.stopArp();
+    // Cancel any scheduled strum/harp attacks
+    this.scheduledAttacks.forEach(timeout => clearTimeout(timeout));
+    this.scheduledAttacks = [];
     this.synth?.dispose();
     this.bassSynth?.dispose();
     this.reverb?.dispose();

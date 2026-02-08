@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
-import { NOTE_NAMES } from "@/lib/audioEngine";
+import { audioEngine, NOTE_NAMES } from "@/lib/audioEngine";
 
 interface KeyboardProps {
   onNoteOn: (note: number) => void;
   onNoteOff: (note: number) => void;
   activeNotes: Set<number>;
+  /** Called synchronously on pointer down so audio init runs in the same user gesture (required on mobile) */
+  onPointerDownForAudio?: () => void;
 }
 
 const WHITE_KEYS = [0, 2, 4, 5, 7, 9, 11, 12];
@@ -34,7 +36,7 @@ const KEY_CODE_MAP: Record<string, number> = {
   Comma: 12,
 };
 
-export function Keyboard({ onNoteOn, onNoteOff, activeNotes }: KeyboardProps) {
+export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAudio }: KeyboardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activePointersRef = useRef<Map<number, number>>(new Map()); // pointerId -> note
   const keyboardKeysRef = useRef<Set<number>>(new Set()); // Currently held keyboard keys (note numbers)
@@ -149,6 +151,10 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes }: KeyboardProps) {
     (e: React.PointerEvent) => {
       e.preventDefault();
 
+      // MUST run synchronously in the same user gesture - required for mobile audio context unlock
+      audioEngine.unlockAudio();
+      onPointerDownForAudio?.();
+
       // Capture pointer on container to ensure all events route here
       containerRef.current?.setPointerCapture(e.pointerId);
 
@@ -158,7 +164,7 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes }: KeyboardProps) {
         onNoteOn(note);
       }
     },
-    [getNoteFromPoint, onNoteOn],
+    [getNoteFromPoint, onNoteOn, onPointerDownForAudio],
   );
 
   // Handle pointer move - for sliding across keys
@@ -172,21 +178,19 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes }: KeyboardProps) {
 
       // If moved to a different key
       if (newNote !== currentNote) {
-        // Update tracking first (before checking if note is still held)
+        // Update tracking to new note first
         if (newNote !== null) {
           activePointersRef.current.set(e.pointerId, newNote);
         } else {
           activePointersRef.current.delete(e.pointerId);
         }
 
-        // IMPORTANT: Play new note BEFORE releasing old note
-        // This ensures the audio engine sees this as a slide (new voice exists before old is released)
-        // which keeps the arpeggiator running instead of stopping and restarting
+        // Play new note FIRST (important for arp mode to continue during slides)
         if (newNote !== null) {
           onNoteOn(newNote);
         }
 
-        // Release old note only if no other source is holding it
+        // Then release old note (if no other source is holding it)
         if (currentNote !== undefined && !isNoteHeldByAnySource(currentNote)) {
           onNoteOff(currentNote);
         }

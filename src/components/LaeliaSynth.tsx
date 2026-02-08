@@ -46,15 +46,14 @@ export function LaeliaSynth() {
   const unlockAudio = useCallback(() => audioEngine.unlockAudio(), []);
 
   const ensureAudio = useCallback(async () => {
+    // MUST call unlockAudio synchronously - mobile requires audio context resume in same user gesture
     unlockAudio();
     if (!isReady) {
       setIsInitializing(true);
-      // Yield to let React paint the initializing state before we block on ensureReady.
-      await new Promise((r) => requestAnimationFrame(r));
+      // Don't yield before ensureReady - breaks mobile user gesture chain
       const start = Date.now();
       const success = await audioEngine.ensureReady();
       if (success) setIsReady(true);
-      // Keep power-on visible for at least 600ms so the glow/grow is noticeable
       const elapsed = Date.now() - start;
       if (elapsed < 600) {
         await new Promise((r) => setTimeout(r, 600 - elapsed));
@@ -196,6 +195,7 @@ export function LaeliaSynth() {
         currentChord={currentChord}
         pressedKeys={pressedKeys}
         activeNotes={activeNotes}
+        onPointerDownForAudio={triggerAudioInit}
         handleRemoveActiveNote={handleRemoveActiveNote}
         volume={volume}
         setVolume={setVolume}
@@ -466,6 +466,7 @@ export function LaeliaSynth() {
                   onNoteOn={handleNoteOn}
                   onNoteOff={handleNoteOff}
                   activeNotes={pressedKeys}
+                  onPointerDownForAudio={triggerAudioInit}
                 />
               </div>
             </div>

@@ -16,6 +16,7 @@ interface LandscapeLayoutProps {
   currentChord: string;
   pressedKeys: Set<number>;
   activeNotes: Array<{ note: string; mode: PerformanceMode }>;
+  onPointerDownForAudio?: () => void;
   handleRemoveActiveNote: (note: string) => void;
   volume: number;
   setVolume: (v: number) => void;
@@ -49,6 +50,7 @@ export function LandscapeLayout({
   currentChord,
   pressedKeys,
   activeNotes,
+  onPointerDownForAudio,
   handleRemoveActiveNote,
   volume,
   setVolume,
@@ -386,6 +388,7 @@ export function LandscapeLayout({
           onNoteOn={handleNoteOn}
           onNoteOff={handleNoteOff}
           activeNotes={pressedKeys}
+          onPointerDownForAudio={onPointerDownForAudio}
         />
       </div>
     </div>

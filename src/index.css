@@ -151,7 +151,8 @@
   .synth-key-black.pressed {
     background: linear-gradient(180deg, hsl(45 80% 45%) 0%, hsl(45 90% 35%) 100%);
     box-shadow: 0 0 12px hsl(var(--synth-glow) / 0.4), 0 2px 3px rgba(0,0,0,0.4);
-    transform: translateY(1px);
+    transform: scaleX(1.06);
+    transform-origin: top center;
   }
 
   .synth-display {
