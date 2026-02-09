@@ -185,15 +185,10 @@ export function LandscapeLayout({
           </div>
         </div>
 
-        {/* Settings toggle button */}
+        {/* Settings toggle button - use only onClick so one tap = one toggle (no double fire on touch) */}
         <button
-          onClick={() => setIsControlsOpen(!isControlsOpen)}
-          onPointerDown={(e) => {
-            if (e.pointerType !== "mouse") {
-              e.preventDefault();
-              setIsControlsOpen((open) => !open);
-            }
-          }}
+          type="button"
+          onClick={() => setIsControlsOpen((open) => !open)}
           className={`
             synth-button p-1.5 shrink-0 transition-all
             ${isControlsOpen ? "bg-primary text-primary-foreground" : ""}
