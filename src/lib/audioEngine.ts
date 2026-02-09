@@ -364,7 +364,9 @@ class AudioEngine {
       this.releaseVoice(noteIndex);
     }
 
-    const t0 = Tone.now() + 0.01;
+    // Use immediate scheduling to avoid Tone's "start time must be strictly greater" errors when slides
+    // generate rapid re-triggers.
+    const t0 = Tone.now();
     this.state.currentNote = noteIndex;
     const rootMidi = 48 + noteIndex + this.state.key;
     const chordMidi = this.buildChord(rootMidi);
@@ -494,12 +496,12 @@ class AudioEngine {
     this.activeVoices.delete(noteIndex);
 
     // Update arp sequence if in arp mode and there are still keys held
-    if (this.state.performanceMode === 'arp' && this.activeVoices.size > 0) {
-      this.updateArpSequence();
-    }
-    
-    // Update display
-    this.currentChordNotes = Array.from(this.activeVoices.values()).flatMap(v => v.notes);
+      if (this.state.performanceMode === 'arp' && this.activeVoices.size > 0) {
+        this.updateArpSequence();
+      }
+
+      // Update display
+      this.currentChordNotes = Array.from(this.activeVoices.values()).flatMap(v => v.notes);
   }
 
   /** Release a specific key's voice - called when a key is released but others remain held */
@@ -514,9 +516,16 @@ class AudioEngine {
     
     // If no more voices, stop everything
     if (this.activeVoices.size === 0) {
+      // No more keys held: stop everything and clear any pending staggered attacks
       this.stopArp();
-      this.bassSynth.triggerRelease(Tone.now());
+      this.scheduledAttacks.forEach(timeout => clearTimeout(timeout));
+      this.scheduledAttacks = [];
+      const now = Tone.now();
+      this.synth.releaseAll(now);
+      this.bassSynth.triggerRelease(now);
       this.currentBassNote = null;
+      this.currentChordNotes = [];
+      this.activeNotesModes.clear();
       this.state.currentNote = -1;
     }
   }

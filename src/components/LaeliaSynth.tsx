@@ -232,6 +232,39 @@ export function LaeliaSynth() {
     [],
   );
 
+  // Hard safety net: if the window loses focus or the mouse/touch ends anywhere,
+  // release all notes and clear pressedKeys. This catches any lost pointer events.
+  useEffect(() => {
+    const releaseEverything = () => {
+      setPressedKeys((prev) => {
+        if (prev.size === 0) return prev;
+        audioEngine.releaseNote();
+        return new Set();
+      });
+      setCurrentChord("");
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") releaseEverything();
+    };
+
+    window.addEventListener("mouseup", releaseEverything, true);
+    window.addEventListener("touchend", releaseEverything, true);
+    window.addEventListener("touchcancel", releaseEverything, true);
+    window.addEventListener("mouseleave", releaseEverything, true);
+    window.addEventListener("blur", releaseEverything);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      window.removeEventListener("mouseup", releaseEverything, true);
+      window.removeEventListener("touchend", releaseEverything, true);
+      window.removeEventListener("touchcancel", releaseEverything, true);
+      window.removeEventListener("mouseleave", releaseEverything, true);
+      window.removeEventListener("blur", releaseEverything);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, []);
+
   const handleNoteOn = useCallback(
     (note: number) => {
       // Trigger audio init on first interaction (non-blocking)

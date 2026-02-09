@@ -36,7 +36,12 @@ const KEY_CODE_MAP: Record<string, number> = {
   Comma: 12,
 };
 
-export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAudio }: KeyboardProps) {
+export function Keyboard({
+  onNoteOn,
+  onNoteOff,
+  activeNotes,
+  onPointerDownForAudio,
+}: KeyboardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activePointersRef = useRef<Map<number, number>>(new Map()); // pointerId -> note
   const keyboardKeysRef = useRef<Set<number>>(new Set()); // Currently held keyboard keys (note numbers)
@@ -57,6 +62,36 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAud
     // Check if keyboard is holding this note
     return keyboardKeysRef.current.has(note);
   }, []);
+
+  // Release every tracked input source (pointers + physical keys). Used as a last-resort safety net when
+  // the pointer leaves the viewport or the tab loses focus so we never leave voices hanging.
+  const releaseAllInputs = useCallback(() => {
+    const notes = new Set<number>();
+    activePointersRef.current.forEach((note) => notes.add(note));
+    keyboardKeysRef.current.forEach((note) => notes.add(note));
+
+    activePointersRef.current.clear();
+    keyboardKeysRef.current.clear();
+
+    notes.forEach((note) => {
+      onNoteOffRef.current(note);
+    });
+  }, []);
+
+  // Release a specific pointer's note if we're tracking it
+  const releasePointer = useCallback(
+    (pointerId: number) => {
+      const note = activePointersRef.current.get(pointerId);
+      if (note === undefined) return;
+
+      activePointersRef.current.delete(pointerId);
+
+      if (!isNoteHeldByAnySource(note)) {
+        onNoteOffRef.current(note);
+      }
+    },
+    [isNoteHeldByAnySource],
+  );
 
   const GAP_PX = 2;
 
@@ -206,16 +241,7 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAud
   // Handle pointer up/cancel/lost capture - stop tracking this pointer
   const handlePointerEnd = useCallback(
     (e: React.PointerEvent) => {
-      const note = activePointersRef.current.get(e.pointerId);
-      if (note !== undefined) {
-        // Update tracking first (before checking if note is still held)
-        activePointersRef.current.delete(e.pointerId);
-
-        // Only release if no other source is holding this note
-        if (!isNoteHeldByAnySource(note)) {
-          onNoteOff(note);
-        }
-      }
+      releasePointer(e.pointerId);
 
       // Release pointer capture
       try {
@@ -224,7 +250,7 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAud
         // Ignore - capture may already be released
       }
     },
-    [onNoteOff, isNoteHeldByAnySource],
+    [releasePointer],
   );
 
   // Keyboard input handling (only when audio is ready, same as pointer)
@@ -279,24 +305,64 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAud
 
   // Cleanup on unmount - release all held notes
   useEffect(() => {
-    // Capture refs at effect time for cleanup
-    const activePointers = activePointersRef.current;
-    const keyboardKeys = keyboardKeysRef.current;
+    return () => {
+      releaseAllInputs();
+    };
+  }, [releaseAllInputs]);
+
+  // Global safety nets: if the pointer ends outside the keyboard or the tab loses focus, release everything.
+  useEffect(() => {
+    const handleGlobalPointerUp = (e: PointerEvent) =>
+      releasePointer(e.pointerId);
+    const handleGlobalPointerCancel = (e: PointerEvent) =>
+      releasePointer(e.pointerId);
+    const handleGlobalPointerMove = (e: PointerEvent) => {
+      // If no buttons are pressed anymore but we still think pointers are down, flush them.
+      if (e.buttons === 0 && activePointersRef.current.size > 0) {
+        releaseAllInputs();
+      }
+    };
+    const handlePointerOut = (e: PointerEvent) => {
+      // relatedTarget === null means we left the document (e.g., pointer leaves viewport)
+      if (e.relatedTarget === null) releaseAllInputs();
+    };
+    const handleMouseLeaveWindow = () => {
+      releaseAllInputs();
+    };
+    const handleTouchEnd = () => {
+      releaseAllInputs();
+    };
+    const handleBlur = () => releaseAllInputs();
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") releaseAllInputs();
+    };
+
+    window.addEventListener("pointerup", handleGlobalPointerUp, true);
+    window.addEventListener("pointercancel", handleGlobalPointerCancel, true);
+    window.addEventListener("pointermove", handleGlobalPointerMove, true);
+    window.addEventListener("pointerout", handlePointerOut, true);
+    window.addEventListener("mouseleave", handleMouseLeaveWindow, true);
+    window.addEventListener("touchend", handleTouchEnd, true);
+    window.addEventListener("touchcancel", handleTouchEnd, true);
+    window.addEventListener("blur", handleBlur);
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
-      // Release all pointer-held notes
-      for (const note of activePointers.values()) {
-        onNoteOffRef.current(note);
-      }
-      activePointers.clear();
-
-      // Release all keyboard-held notes
-      for (const note of keyboardKeys) {
-        onNoteOffRef.current(note);
-      }
-      keyboardKeys.clear();
+      window.removeEventListener("pointerup", handleGlobalPointerUp, true);
+      window.removeEventListener(
+        "pointercancel",
+        handleGlobalPointerCancel,
+        true,
+      );
+      window.removeEventListener("pointermove", handleGlobalPointerMove, true);
+      window.removeEventListener("pointerout", handlePointerOut, true);
+      window.removeEventListener("mouseleave", handleMouseLeaveWindow, true);
+      window.removeEventListener("touchend", handleTouchEnd, true);
+      window.removeEventListener("touchcancel", handleTouchEnd, true);
+      window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, []);
+  }, [releaseAllInputs, releasePointer]);
 
   const handleKeyKeyDown = useCallback(
     (e: React.KeyboardEvent, note: number) => {
@@ -348,34 +414,36 @@ export function Keyboard({ onNoteOn, onNoteOff, activeNotes, onPointerDownForAud
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* Keys in scale order (C, C#, D, ...) - fixed 2px gaps via CSS calc */}
-      {keysInOrder.map(({ note, isWhite, whiteIndex, afterWhiteIndex, height }) => (
-        <button
-          key={note}
-          type="button"
-          className={cn(
-            "absolute left-0 top-0 pointer-events-none",
-            isWhite ? "synth-key-white" : "synth-key-black z-10",
-            activeNotes.has(note) && "pressed",
-          )}
-          style={
-            isWhite
-              ? {
-                  left: `calc(${whiteIndex!} * var(--key-slot))`,
-                  width: "var(--key-width)",
-                  height: `${height}%`,
-                }
-              : {
-                  left: `calc((${afterWhiteIndex!} + 1) * var(--key-slot) - var(--key-slot) * 0.3)`,
-                  width: "calc(var(--key-slot) * 0.6)",
-                  height: `${height}%`,
-                }
-          }
-          aria-label={`Piano key ${NOTE_NAMES[note % 12]}`}
-          tabIndex={0}
-          onKeyDown={(e) => handleKeyKeyDown(e, note)}
-          onKeyUp={(e) => handleKeyKeyUp(e, note)}
-        />
-      ))}
+      {keysInOrder.map(
+        ({ note, isWhite, whiteIndex, afterWhiteIndex, height }) => (
+          <button
+            key={note}
+            type="button"
+            className={cn(
+              "absolute left-0 top-0 pointer-events-none",
+              isWhite ? "synth-key-white" : "synth-key-black z-10",
+              activeNotes.has(note) && "pressed",
+            )}
+            style={
+              isWhite
+                ? {
+                    left: `calc(${whiteIndex!} * var(--key-slot))`,
+                    width: "var(--key-width)",
+                    height: `${height}%`,
+                  }
+                : {
+                    left: `calc((${afterWhiteIndex!} + 1) * var(--key-slot) - var(--key-slot) * 0.3)`,
+                    width: "calc(var(--key-slot) * 0.6)",
+                    height: `${height}%`,
+                  }
+            }
+            aria-label={`Piano key ${NOTE_NAMES[note % 12]}`}
+            tabIndex={0}
+            onKeyDown={(e) => handleKeyKeyDown(e, note)}
+            onKeyUp={(e) => handleKeyKeyUp(e, note)}
+          />
+        ),
+      )}
     </div>
   );
 }
