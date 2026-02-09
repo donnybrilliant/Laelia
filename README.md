@@ -21,6 +21,14 @@ Tech: React, Vite, TypeScript, [Tone.js](https://tonejs.github.io/), Tailwind. N
 
 ---
 
+## Add as PWA (install to home screen)
+
+- **iOS (Safari):** Open the site → Share → “Add to Home Screen.” Unlock audio with a tap after opening from the home screen.
+- **Android (Chrome):** Open the site → menu (⋮) → “Install app” or “Add to Home screen.”
+- **Desktop (Chrome/Edge):** Visit the site → install icon in the address bar (⊕ or “Install Laelia”) → Install.
+
+Use the live site (e.g. your Netlify URL) for install; `localhost` won’t offer install on most devices.
+
 ## Run it
 
 ```bash
@@ -29,14 +37,6 @@ npm run dev
 ```
 
 Then open the URL (e.g. `http://localhost:5173`), tap to unlock audio, and play.
-
-### Add as PWA (install to home screen)
-
-- **iOS (Safari):** Open the site → Share → “Add to Home Screen.” Unlock audio with a tap after opening from the home screen.
-- **Android (Chrome):** Open the site → menu (⋮) → “Install app” or “Add to Home screen.”
-- **Desktop (Chrome/Edge):** Visit the site → install icon in the address bar (⊕ or “Install Laelia”) → Install.
-
-Use the live site (e.g. your Netlify URL) for install; `localhost` won’t offer install on most devices.
 
 **Build for production:**
 
