@@ -46,6 +46,11 @@ const SOUND_PRESETS = [
 const PERFORMANCE_MODES = ['poly', 'strum', 'arp', 'harp'] as const;
 export type PerformanceMode = typeof PERFORMANCE_MODES[number];
 
+/** Tone.js PolySynth keeps voices in private _voices; not in public API. Used only for getActiveNotes(). */
+interface PolySynthWithVoices {
+  _voices?: ToneType.Synth[];
+}
+
 export interface SynthState {
   volume: number;
   sound: number;
@@ -442,7 +447,7 @@ class AudioEngine {
       // Cancel any scheduled strum/harp attacks that haven't happened yet
       this.scheduledAttacks.forEach(timeout => clearTimeout(timeout));
       this.scheduledAttacks = [];
-      
+
       // Release all currently playing notes immediately
       const now = toneModule!.now();
       this.synth.releaseAll(now);
@@ -562,24 +567,24 @@ class AudioEngine {
     this.activeVoices.delete(noteIndex);
 
     // Update arp sequence if in arp mode and there are still keys held
-      if (this.state.performanceMode === 'arp' && this.activeVoices.size > 0) {
-        this.updateArpSequence();
-      }
+    if (this.state.performanceMode === 'arp' && this.activeVoices.size > 0) {
+      this.updateArpSequence();
+    }
 
-      // Update display
-      this.currentChordNotes = Array.from(this.activeVoices.values()).flatMap(v => v.notes);
+    // Update display
+    this.currentChordNotes = Array.from(this.activeVoices.values()).flatMap(v => v.notes);
   }
 
   /** Release a specific key's voice - called when a key is released but others remain held */
   releaseKey(noteIndex: number): void {
     if (!this.synth || !this.bassSynth) return;
-    
+
     const voice = this.activeVoices.get(noteIndex);
     if (!voice) return;
 
     // Release the voice
     this.releaseVoice(noteIndex);
-    
+
     // If no more voices, stop everything
     if (this.activeVoices.size === 0) {
       // No more keys held: stop everything and clear any pending staggered attacks
@@ -653,8 +658,7 @@ class AudioEngine {
 
   getActiveNotes(): Array<{ note: string; mode: PerformanceMode }> {
     if (!this.synth || !toneModule) return [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const voices = (this.synth as any)._voices as ToneType.Synth[] | undefined;
+    const voices = (this.synth as unknown as PolySynthWithVoices)._voices;
     if (!voices) {
       return this.currentChordNotes.map(note => ({
         note,
