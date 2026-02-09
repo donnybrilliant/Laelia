@@ -316,19 +316,6 @@ export function Keyboard({
       releasePointer(e.pointerId);
     const handleGlobalPointerCancel = (e: PointerEvent) =>
       releasePointer(e.pointerId);
-    const handleGlobalPointerMove = (e: PointerEvent) => {
-      // If no buttons are pressed anymore but we still think pointers are down, flush them.
-      if (e.buttons === 0 && activePointersRef.current.size > 0) {
-        releaseAllInputs();
-      }
-    };
-    const handlePointerOut = (e: PointerEvent) => {
-      // relatedTarget === null means we left the document (e.g., pointer leaves viewport)
-      if (e.relatedTarget === null) releaseAllInputs();
-    };
-    const handleMouseLeaveWindow = () => {
-      releaseAllInputs();
-    };
     const handleBlur = () => releaseAllInputs();
     const handleVisibility = () => {
       if (document.visibilityState === "hidden") releaseAllInputs();
@@ -339,9 +326,6 @@ export function Keyboard({
     // the user touches a button with another finger while holding a key.
     window.addEventListener("pointerup", handleGlobalPointerUp, true);
     window.addEventListener("pointercancel", handleGlobalPointerCancel, true);
-    window.addEventListener("pointermove", handleGlobalPointerMove, true);
-    window.addEventListener("pointerout", handlePointerOut, true);
-    window.addEventListener("mouseleave", handleMouseLeaveWindow, true);
     window.addEventListener("blur", handleBlur);
     document.addEventListener("visibilitychange", handleVisibility);
 
@@ -352,13 +336,20 @@ export function Keyboard({
         handleGlobalPointerCancel,
         true,
       );
-      window.removeEventListener("pointermove", handleGlobalPointerMove, true);
-      window.removeEventListener("pointerout", handlePointerOut, true);
-      window.removeEventListener("mouseleave", handleMouseLeaveWindow, true);
       window.removeEventListener("blur", handleBlur);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [releaseAllInputs, releasePointer]);
+
+  // Keep mouse behavior intuitive on desktop: if the mouse leaves the keybed while dragging,
+  // release the held pointer note. Touch pointers are handled strictly by pointerup/cancel.
+  const handlePointerLeave = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== "mouse") return;
+      releasePointer(e.pointerId);
+    },
+    [releasePointer],
+  );
 
   const handleKeyKeyDown = useCallback(
     (e: React.KeyboardEvent, note: number) => {
@@ -405,7 +396,7 @@ export function Keyboard({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
       onPointerCancel={handlePointerEnd}
-      onPointerLeave={handlePointerEnd}
+      onPointerLeave={handlePointerLeave}
       onLostPointerCapture={handlePointerEnd}
       onContextMenu={(e) => e.preventDefault()}
     >

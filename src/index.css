@@ -113,13 +113,13 @@
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* Prevent double-tap zoom and weird touch behaviors on interactive elements */
+  /* Keep synth interactions deterministic during multi-touch play on mobile */
   .synth-key-white,
   .synth-key-black,
   .synth-button,
   .synth-dial,
   canvas {
-    touch-action: manipulation;
+    touch-action: none;
   }
 
   .selectable-text {
