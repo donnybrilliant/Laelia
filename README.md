@@ -5,7 +5,7 @@
 A browser-based chord synth. Chords, strums, arpeggios, harp modes.
 Add to home screen and pretend it’s a real instrument.
 
-Inspired by the [Orchid](https://telepathicinstruments.com/) from Telepathic Instruments — except I only ever watched the first teaser. No demo, no manual, never held one.
+Inspired by the [Orchid](https://telepathicinstruments.com/) from Telepathic Instruments - except I only ever watched the first teaser. No demo, no manual, never held one.
 So this isn’t a clone; it’s just how I picture the thing from that one video.
 
 ## What’s in the box
@@ -49,4 +49,4 @@ npm run preview
 
 ## License
 
-MIT. If you’re from Telepathic Instruments and this is wildly wrong, no hard feelings — I really did only watch the first teaser.
+MIT. If you’re from Telepathic Instruments and this is wildly wrong, no hard feelings - I really did only watch the first teaser.
