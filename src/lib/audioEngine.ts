@@ -1,4 +1,13 @@
-import * as Tone from 'tone';
+import type * as ToneType from 'tone';
+
+/** Lazy-loaded at first user gesture to avoid AudioContext creation before user interaction. */
+let toneModule: typeof ToneType | null = null;
+
+/** Load Tone.js (and thus create AudioContext) only after a user gesture. Call from ensureAudio() before unlock/init. */
+export async function loadTone(): Promise<void> {
+  if (toneModule) return;
+  toneModule = await import('tone');
+}
 
 const CHORD_INTERVALS = {
   maj: [0, 4, 7],
@@ -45,15 +54,15 @@ export interface SynthState {
 }
 
 class AudioEngine {
-  private synth: Tone.PolySynth | null = null;
-  private bassSynth: Tone.Synth | null = null;
-  private reverb: Tone.Reverb | null = null;
-  private delay: Tone.FeedbackDelay | null = null;
-  private chorus: Tone.Chorus | null = null;
-  private phaser: Tone.Phaser | null = null;
-  private tremolo: Tone.Tremolo | null = null;
-  private distortion: Tone.Distortion | null = null;
-  private analyser: Tone.Analyser | null = null;
+  private synth: ToneType.PolySynth | null = null;
+  private bassSynth: ToneType.Synth | null = null;
+  private reverb: ToneType.Reverb | null = null;
+  private delay: ToneType.FeedbackDelay | null = null;
+  private chorus: ToneType.Chorus | null = null;
+  private phaser: ToneType.Phaser | null = null;
+  private tremolo: ToneType.Tremolo | null = null;
+  private distortion: ToneType.Distortion | null = null;
+  private analyser: ToneType.Analyser | null = null;
   private initialized = false;
   private arpInterval: ReturnType<typeof setInterval> | null = null;
   private arpIndex = 0;
@@ -85,12 +94,13 @@ class AudioEngine {
   };
 
   async init(): Promise<boolean> {
-    if (this.initialized) return true;
+    if (this.initialized || !toneModule) return true;
+    const T = toneModule;
     try {
-      const ctx = Tone.getContext();
+      const ctx = T.getContext();
       // Don't rely only on await Tone.start() - it can hang on Chrome iOS. Race with a short wait, then poll.
       const startResolved = await Promise.race([
-        Tone.start().then(() => ctx.state === 'running'),
+        T.start().then(() => ctx.state === 'running'),
         new Promise<boolean>((resolve) => setTimeout(() => resolve(ctx.state === 'running'), 400)),
       ]);
       if (!startResolved && ctx.state !== 'running') {
@@ -98,21 +108,21 @@ class AudioEngine {
         if (!ok) return false;
       }
 
-      this.analyser = new Tone.Analyser('waveform', 128);
-      this.reverb = new Tone.Reverb({ decay: 2.5, wet: 0.3 }).toDestination();
+      this.analyser = new T.Analyser('waveform', 128);
+      this.reverb = new T.Reverb({ decay: 2.5, wet: 0.3 }).toDestination();
       this.reverb.connect(this.analyser);
-      this.delay = new Tone.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 0.2 }).connect(this.reverb);
-      this.chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 0.3 }).connect(this.delay);
-      this.phaser = new Tone.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 350, wet: 0.2 }).connect(this.chorus);
-      this.tremolo = new Tone.Tremolo({ frequency: 4, depth: 0.6, wet: 0 }).connect(this.phaser).start();
-      this.distortion = new Tone.Distortion({ distortion: 0.1, wet: 0 }).connect(this.tremolo);
+      this.delay = new T.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 0.2 }).connect(this.reverb);
+      this.chorus = new T.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 0.3 }).connect(this.delay);
+      this.phaser = new T.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 350, wet: 0.2 }).connect(this.chorus);
+      this.tremolo = new T.Tremolo({ frequency: 4, depth: 0.6, wet: 0 }).connect(this.phaser).start();
+      this.distortion = new T.Distortion({ distortion: 0.1, wet: 0 }).connect(this.tremolo);
 
-      this.synth = new Tone.PolySynth(Tone.Synth, {
+      this.synth = new T.PolySynth(T.Synth, {
         oscillator: { type: 'triangle' },
         envelope: { attack: 0.02, decay: 0.3, sustain: 0.4, release: 1.2 },
       }).connect(this.distortion);
 
-      this.bassSynth = new Tone.Synth({
+      this.bassSynth = new T.Synth({
         oscillator: { type: 'triangle' },
         envelope: { attack: 0.02, decay: 0.2, sustain: 0.5, release: 0.8 },
       }).connect(this.distortion);
@@ -126,10 +136,12 @@ class AudioEngine {
     }
   }
 
-  /** Call synchronously in a user gesture (e.g. pointer down). Required on mobile Safari/Chrome. */
+  /** Call synchronously in a user gesture (e.g. pointer down). Required on mobile Safari/Chrome. Call after loadTone(). */
   unlockAudio(): void {
-    Tone.start();
-    const ctx = Tone.getContext();
+    if (!toneModule) return;
+    const T = toneModule;
+    T.start();
+    const ctx = T.getContext();
     if (ctx.state === 'suspended') ctx.resume();
     // Chrome iOS and some mobile browsers use 'interrupted' state; Tone only handles 'suspended'. Raw resume helps.
     const raw = (ctx as unknown as { rawContext?: AudioContext }).rawContext;
@@ -138,7 +150,8 @@ class AudioEngine {
 
   /** Wait for context to be running without hanging (Chrome iOS can leave Tone.start() unresolved). */
   private async waitForContextRunning(maxMs: number): Promise<boolean> {
-    const ctx = Tone.getContext();
+    if (!toneModule) return false;
+    const ctx = toneModule.getContext();
     const raw = (ctx as unknown as { rawContext?: AudioContext }).rawContext;
     const start = Date.now();
     while (Date.now() - start < maxMs) {
@@ -157,17 +170,19 @@ class AudioEngine {
   }
 
   async ensureReady(): Promise<boolean> {
-    if (this.initialized && Tone.getContext().state === 'running') return true;
+    if (!toneModule) return false;
+    if (this.initialized && toneModule.getContext().state === 'running') return true;
     return this.init();
   }
 
   isReady(): boolean {
-    return this.initialized && Tone.getContext().state === 'running';
+    return !!toneModule && this.initialized && toneModule.getContext().state === 'running';
   }
 
   updateVolume(value: number): void {
     this.state.volume = value;
-    const dbValue = Tone.gainToDb(value);
+    if (!toneModule) return;
+    const dbValue = toneModule.gainToDb(value);
     if (this.synth) this.synth.volume.value = dbValue;
     if (this.bassSynth) this.bassSynth.volume.value = dbValue - 6;
   }
@@ -193,7 +208,8 @@ class AudioEngine {
 
   updateBpm(bpm: number): void {
     this.state.bpm = bpm;
-    Tone.getTransport().bpm.value = bpm;
+    if (!toneModule) return;
+    toneModule.getTransport().bpm.value = bpm;
     if (this.delay) this.delay.delayTime.value = 60 / bpm / 2;
     if (this.tremolo) this.tremolo.frequency.value = bpm / 30;
   }
@@ -218,8 +234,8 @@ class AudioEngine {
       this.arpInterval = null;
     }
     // Release the currently-playing arp note to prevent stuck notes
-    if (this.currentArpNote && this.synth) {
-      this.synth.triggerRelease(this.currentArpNote, Tone.now());
+    if (this.currentArpNote && this.synth && toneModule) {
+      this.synth.triggerRelease(this.currentArpNote, toneModule.now());
       this.currentArpNote = null;
     }
     this.arpIndex = 0;
@@ -355,7 +371,7 @@ class AudioEngine {
       this.scheduledAttacks = [];
       
       // Release all currently playing notes immediately
-      const now = Tone.now();
+      const now = toneModule!.now();
       this.synth.releaseAll(now);
       this.activeNotesModes.clear();
       this.activeVoices.clear();
@@ -366,7 +382,7 @@ class AudioEngine {
 
     // Use immediate scheduling to avoid Tone's "start time must be strictly greater" errors when slides
     // generate rapid re-triggers.
-    const t0 = Tone.now();
+    const t0 = toneModule!.now();
     this.state.currentNote = noteIndex;
     const rootMidi = 48 + noteIndex + this.state.key;
     const chordMidi = this.buildChord(rootMidi);
@@ -396,7 +412,7 @@ class AudioEngine {
         // Subsequent notes are scheduled via setTimeout
         noteStrings.slice(1).forEach((note, i) => {
           const timeout = setTimeout(() => {
-            this.synth?.triggerAttack(note, Tone.now());
+            this.synth?.triggerAttack(note, toneModule!.now());
           }, (i + 1) * 50); // 50ms stagger
           this.scheduledAttacks.push(timeout);
         });
@@ -422,7 +438,7 @@ class AudioEngine {
           this.arpInterval = setInterval(() => {
             if (!this.synth) return;
 
-            const now = Tone.now() + 0.01;
+            const now = toneModule!.now() + 0.01;
 
             // Release current note
             if (this.currentArpNote) {
@@ -463,7 +479,7 @@ class AudioEngine {
         // Subsequent notes are scheduled via setTimeout
         trackedNotes.slice(1).forEach((note, i) => {
           const timeout = setTimeout(() => {
-            this.synth?.triggerAttack(note, Tone.now());
+            this.synth?.triggerAttack(note, toneModule!.now());
           }, (i + 1) * 30); // 30ms stagger
           this.scheduledAttacks.push(timeout);
         });
@@ -483,9 +499,9 @@ class AudioEngine {
   /** Release notes for a specific voice/key (internal use) */
   private releaseVoice(noteIndex: number): void {
     const voice = this.activeVoices.get(noteIndex);
-    if (!voice) return;
+    if (!voice || !toneModule) return;
 
-    const now = Tone.now();
+    const now = toneModule.now();
 
     // Release all notes from this voice
     voice.notes.forEach(note => {
@@ -520,7 +536,7 @@ class AudioEngine {
       this.stopArp();
       this.scheduledAttacks.forEach(timeout => clearTimeout(timeout));
       this.scheduledAttacks = [];
-      const now = Tone.now();
+      const now = toneModule!.now();
       this.synth.releaseAll(now);
       this.bassSynth.triggerRelease(now);
       this.currentBassNote = null;
@@ -531,12 +547,12 @@ class AudioEngine {
   }
 
   releaseNote(): void {
-    if (!this.synth || !this.bassSynth) return;
+    if (!this.synth || !this.bassSynth || !toneModule) return;
     this.stopArp();
     // Cancel any scheduled strum/harp attacks
     this.scheduledAttacks.forEach(timeout => clearTimeout(timeout));
     this.scheduledAttacks = [];
-    const now = Tone.now();
+    const now = toneModule.now();
     this.synth.releaseAll(now);
     this.bassSynth.triggerRelease(now);
     this.currentBassNote = null;
@@ -547,8 +563,8 @@ class AudioEngine {
   }
 
   releaseSpecificNote(noteToRelease: string): void {
-    if (!this.synth) return;
-    this.synth.triggerRelease(noteToRelease, Tone.now());
+    if (!this.synth || !toneModule) return;
+    this.synth.triggerRelease(noteToRelease, toneModule.now());
     this.activeNotesModes.delete(noteToRelease);
 
     // Remove from voice tracking
@@ -581,9 +597,9 @@ class AudioEngine {
   }
 
   getActiveNotes(): Array<{ note: string; mode: PerformanceMode }> {
-    if (!this.synth) return [];
+    if (!this.synth || !toneModule) return [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const voices = (this.synth as any)._voices as Tone.Synth[] | undefined;
+    const voices = (this.synth as any)._voices as ToneType.Synth[] | undefined;
     if (!voices) {
       return this.currentChordNotes.map(note => ({
         note,
@@ -592,10 +608,11 @@ class AudioEngine {
     }
     const activeNotes: Array<{ note: string; mode: PerformanceMode }> = [];
     const seenNotes = new Set<string>();
-    voices.forEach((voice: Tone.Synth) => {
+    const T = toneModule;
+    voices.forEach((voice: ToneType.Synth) => {
       const env = voice.envelope;
       if (env && env.value > 0.01) {
-        const note = Tone.Frequency(voice.frequency.value).toNote();
+        const note = T.Frequency(voice.frequency.value).toNote();
         if (!seenNotes.has(note)) {
           seenNotes.add(note);
           activeNotes.push({ note, mode: this.activeNotesModes.get(note) || this.state.performanceMode });

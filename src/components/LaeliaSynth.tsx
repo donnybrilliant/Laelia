@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, useRef } from "react";
 import { flushSync } from "react-dom";
 import {
   audioEngine,
+  loadTone,
   PerformanceMode,
   PERFORMANCE_MODES,
   NOTE_NAMES,
@@ -58,6 +59,8 @@ export function LaeliaSynth() {
   }, []);
 
   const ensureAudio = useCallback(async () => {
+    // Load Tone.js only after user gesture so AudioContext is created in a valid context (avoids console warning)
+    await loadTone();
     // MUST call unlockAudio synchronously - mobile requires audio context resume in same user gesture
     unlockAudio();
     if (!isReady) {
