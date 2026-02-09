@@ -64,7 +64,7 @@ class AudioEngine {
   private distortion: ToneType.Distortion | null = null;
   private analyser: ToneType.Analyser | null = null;
   private initialized = false;
-  private arpInterval: ReturnType<typeof setInterval> | null = null;
+  private arpTimeout: ReturnType<typeof setTimeout> | null = null;
   private arpIndex = 0;
   private currentArpNote: string | null = null;
   private currentBassNote: string | null = null;
@@ -229,9 +229,9 @@ class AudioEngine {
   }
 
   private stopArp(): void {
-    if (this.arpInterval) {
-      clearInterval(this.arpInterval);
-      this.arpInterval = null;
+    if (this.arpTimeout !== null) {
+      clearTimeout(this.arpTimeout);
+      this.arpTimeout = null;
     }
     // Release the currently-playing arp note to prevent stuck notes
     if (this.currentArpNote && this.synth && toneModule) {
@@ -250,6 +250,33 @@ class AudioEngine {
     const [, noteName, octaveStr] = match;
     const noteIndex = NOTE_NAMES.indexOf(noteName);
     return (parseInt(octaveStr) + 1) * 12 + noteIndex;
+  }
+
+  /** Single tick of the arpeggiator (release current, advance to next, trigger attack) */
+  private arpTick(): void {
+    if (!this.synth || !toneModule) return;
+    const now = toneModule.now() + 0.01;
+    if (this.currentArpNote) {
+      this.synth.triggerRelease(this.currentArpNote, now);
+    }
+    if (this.arpTransitionQueue.length > 0) {
+      this.currentArpNote = this.arpTransitionQueue.shift()!;
+      this.synth.triggerAttack(this.currentArpNote, now);
+      return;
+    }
+    if (this.arpSequence.length > 0) {
+      this.arpIndex = (this.arpIndex + 1) % this.arpSequence.length;
+      this.currentArpNote = this.arpSequence[this.arpIndex];
+      this.synth.triggerAttack(this.currentArpNote, now);
+    }
+  }
+
+  /** Schedule the next arp tick using current BPM (loop continues with current tempo) */
+  private scheduleNextArpTick(): void {
+    this.arpTimeout = setTimeout(() => {
+      this.arpTick();
+      this.scheduleNextArpTick();
+    }, 60000 / this.state.bpm / 2);
   }
 
   /** Get all unique notes from all active voices, sorted by pitch */
@@ -313,7 +340,7 @@ class AudioEngine {
     const newSequence = this.getAllArpNotes();
 
     // If this is the first key or arp isn't running, just set the sequence
-    if (!this.arpInterval || this.arpSequence.length === 0) {
+    if (this.arpTimeout === null || this.arpSequence.length === 0) {
       this.arpSequence = newSequence;
       this.arpIndex = 0;
       return;
@@ -435,30 +462,7 @@ class AudioEngine {
             this.synth.triggerAttack(this.currentArpNote, t0);
           }
 
-          this.arpInterval = setInterval(() => {
-            if (!this.synth) return;
-
-            const now = toneModule!.now() + 0.01;
-
-            // Release current note
-            if (this.currentArpNote) {
-              this.synth.triggerRelease(this.currentArpNote, now);
-            }
-
-            // Check if we have transition notes to play first
-            if (this.arpTransitionQueue.length > 0) {
-              this.currentArpNote = this.arpTransitionQueue.shift()!;
-              this.synth.triggerAttack(this.currentArpNote, now);
-              return;
-            }
-
-            // Normal arp progression
-            if (this.arpSequence.length > 0) {
-              this.arpIndex = (this.arpIndex + 1) % this.arpSequence.length;
-              this.currentArpNote = this.arpSequence[this.arpIndex];
-              this.synth.triggerAttack(this.currentArpNote, now);
-            }
-          }, 60000 / this.state.bpm / 2);
+          this.scheduleNextArpTick();
         } else {
           // Additional key - update the sequence with smooth transition
           this.updateArpSequence();

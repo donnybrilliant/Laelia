@@ -235,8 +235,9 @@ export function LaeliaSynth() {
     [],
   );
 
-  // Hard safety net: if the window loses focus or the mouse/touch ends anywhere,
-  // release all notes and clear pressedKeys. This catches any lost pointer events.
+  // Safety net: only release when the window actually loses focus or the tab is hidden.
+  // Do not release on mouseup/touchend/mouseleave—that would cancel notes when the user
+  // clicks a button or touches a control while still holding a key (keyboard or finger).
   useEffect(() => {
     const releaseEverything = () => {
       setPressedKeys((prev) => {
@@ -251,18 +252,10 @@ export function LaeliaSynth() {
       if (document.visibilityState === "hidden") releaseEverything();
     };
 
-    window.addEventListener("mouseup", releaseEverything, true);
-    window.addEventListener("touchend", releaseEverything, true);
-    window.addEventListener("touchcancel", releaseEverything, true);
-    window.addEventListener("mouseleave", releaseEverything, true);
     window.addEventListener("blur", releaseEverything);
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
-      window.removeEventListener("mouseup", releaseEverything, true);
-      window.removeEventListener("touchend", releaseEverything, true);
-      window.removeEventListener("touchcancel", releaseEverything, true);
-      window.removeEventListener("mouseleave", releaseEverything, true);
       window.removeEventListener("blur", releaseEverything);
       document.removeEventListener("visibilitychange", handleVisibility);
     };

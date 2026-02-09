@@ -329,21 +329,19 @@ export function Keyboard({
     const handleMouseLeaveWindow = () => {
       releaseAllInputs();
     };
-    const handleTouchEnd = () => {
-      releaseAllInputs();
-    };
     const handleBlur = () => releaseAllInputs();
     const handleVisibility = () => {
       if (document.visibilityState === "hidden") releaseAllInputs();
     };
 
+    // Per-pointer release only: pointerup/pointercancel release that pointer's note.
+    // Do NOT listen to global touchend/touchcancel—that would release all notes when
+    // the user touches a button with another finger while holding a key.
     window.addEventListener("pointerup", handleGlobalPointerUp, true);
     window.addEventListener("pointercancel", handleGlobalPointerCancel, true);
     window.addEventListener("pointermove", handleGlobalPointerMove, true);
     window.addEventListener("pointerout", handlePointerOut, true);
     window.addEventListener("mouseleave", handleMouseLeaveWindow, true);
-    window.addEventListener("touchend", handleTouchEnd, true);
-    window.addEventListener("touchcancel", handleTouchEnd, true);
     window.addEventListener("blur", handleBlur);
     document.addEventListener("visibilitychange", handleVisibility);
 
@@ -357,8 +355,6 @@ export function Keyboard({
       window.removeEventListener("pointermove", handleGlobalPointerMove, true);
       window.removeEventListener("pointerout", handlePointerOut, true);
       window.removeEventListener("mouseleave", handleMouseLeaveWindow, true);
-      window.removeEventListener("touchend", handleTouchEnd, true);
-      window.removeEventListener("touchcancel", handleTouchEnd, true);
       window.removeEventListener("blur", handleBlur);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
