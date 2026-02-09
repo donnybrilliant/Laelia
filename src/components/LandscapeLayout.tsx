@@ -278,7 +278,7 @@ export function LandscapeLayout({
               label="BPM"
               value={bpm}
               min={40}
-              max={200}
+              max={300}
               step={1}
               onChange={(v) => {
                 ensureAudio();

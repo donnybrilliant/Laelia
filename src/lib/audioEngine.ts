@@ -24,6 +24,13 @@ const EXTENSION_INTERVALS = {
 };
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const MAX_POLYPHONY = 64;
+const CHORD_VELOCITY = 0.68;
+const HARP_VELOCITY = 0.5;
+const BASS_VELOCITY = 0.62;
+const BPM_RAMP_TIME_SEC = 0.08;
+const MODULATION_RAMP_TIME_SEC = 0.06;
+const MASTER_OUTPUT_GAIN = 0.72;
 
 const SOUND_PRESETS = [
   { name: 'Piano', oscillator: 'triangle', attack: 0.02, decay: 0.3, sustain: 0.4, release: 1.2 },
@@ -56,6 +63,9 @@ export interface SynthState {
 class AudioEngine {
   private synth: ToneType.PolySynth | null = null;
   private bassSynth: ToneType.Synth | null = null;
+  private compressor: ToneType.Compressor | null = null;
+  private masterGain: ToneType.Gain | null = null;
+  private limiter: ToneType.Limiter | null = null;
   private reverb: ToneType.Reverb | null = null;
   private delay: ToneType.FeedbackDelay | null = null;
   private chorus: ToneType.Chorus | null = null;
@@ -78,6 +88,8 @@ class AudioEngine {
   private arpTransitionQueue: string[] = [];
   /** Scheduled strum/harp attack timeouts that can be cancelled */
   private scheduledAttacks: ReturnType<typeof setTimeout>[] = [];
+  /** Delay-time update to apply once playback is idle (avoids glitching while notes are sounding). */
+  private pendingDelayTime: number | null = null;
 
   state: SynthState = {
     volume: 0.7,
@@ -109,17 +121,29 @@ class AudioEngine {
       }
 
       this.analyser = new T.Analyser('waveform', 128);
-      this.reverb = new T.Reverb({ decay: 2.5, wet: 0.3 }).toDestination();
-      this.reverb.connect(this.analyser);
+      this.limiter = new T.Limiter(-1).toDestination();
+      this.limiter.connect(this.analyser);
+      this.masterGain = new T.Gain(MASTER_OUTPUT_GAIN).connect(this.limiter);
+      this.compressor = new T.Compressor({
+        threshold: -20,
+        ratio: 3,
+        attack: 0.003,
+        release: 0.12,
+      }).connect(this.masterGain);
+      this.reverb = new T.Reverb({ decay: 2.5, wet: 0.3 }).connect(this.compressor);
       this.delay = new T.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 0.2 }).connect(this.reverb);
       this.chorus = new T.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 0.3 }).connect(this.delay);
       this.phaser = new T.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 350, wet: 0.2 }).connect(this.chorus);
       this.tremolo = new T.Tremolo({ frequency: 4, depth: 0.6, wet: 0 }).connect(this.phaser).start();
       this.distortion = new T.Distortion({ distortion: 0.1, wet: 0 }).connect(this.tremolo);
 
-      this.synth = new T.PolySynth(T.Synth, {
-        oscillator: { type: 'triangle' },
-        envelope: { attack: 0.02, decay: 0.3, sustain: 0.4, release: 1.2 },
+      this.synth = new T.PolySynth({
+        voice: T.Synth,
+        maxPolyphony: MAX_POLYPHONY,
+        options: {
+          oscillator: { type: 'triangle' },
+          envelope: { attack: 0.02, decay: 0.3, sustain: 0.4, release: 1.2 },
+        },
       }).connect(this.distortion);
 
       this.bassSynth = new T.Synth({
@@ -128,6 +152,7 @@ class AudioEngine {
       }).connect(this.distortion);
 
       this.updateVolume(this.state.volume);
+      this.updateBpm(this.state.bpm);
       this.initialized = true;
       return true;
     } catch (e) {
@@ -180,11 +205,14 @@ class AudioEngine {
   }
 
   updateVolume(value: number): void {
-    this.state.volume = value;
+    const clampedValue = Math.max(0, Math.min(1, value));
+    this.state.volume = clampedValue;
     if (!toneModule) return;
-    const dbValue = toneModule.gainToDb(value);
-    if (this.synth) this.synth.volume.value = dbValue;
-    if (this.bassSynth) this.bassSynth.volume.value = dbValue - 6;
+    // Keep some safety headroom even at max knob to avoid desktop clipping on dense chords/effects.
+    const safeGain = clampedValue * 0.82;
+    const dbValue = safeGain > 0 ? toneModule.gainToDb(safeGain) : -Infinity;
+    if (this.synth) this.synth.volume.value = dbValue - 3;
+    if (this.bassSynth) this.bassSynth.volume.value = dbValue - 10;
   }
 
   updateSound(index: number): void {
@@ -206,12 +234,30 @@ class AudioEngine {
     if (this.phaser) this.phaser.wet.value = value * 0.3;
   }
 
+  private applyPendingDelayTime(now: number): void {
+    if (!this.delay || this.pendingDelayTime === null) return;
+    this.delay.delayTime.cancelAndHoldAtTime(now);
+    this.delay.delayTime.rampTo(this.pendingDelayTime, MODULATION_RAMP_TIME_SEC, now);
+    this.pendingDelayTime = null;
+  }
+
   updateBpm(bpm: number): void {
-    this.state.bpm = bpm;
+    const clampedBpm = Math.max(40, Math.min(300, bpm));
+    this.state.bpm = clampedBpm;
     if (!toneModule) return;
-    toneModule.getTransport().bpm.value = bpm;
-    if (this.delay) this.delay.delayTime.value = 60 / bpm / 2;
-    if (this.tremolo) this.tremolo.frequency.value = bpm / 30;
+    const now = toneModule.now();
+    const transportBpm = toneModule.getTransport().bpm;
+    transportBpm.cancelAndHoldAtTime(now);
+    transportBpm.rampTo(clampedBpm, BPM_RAMP_TIME_SEC, now);
+    if (this.delay) {
+      this.pendingDelayTime = 60 / clampedBpm / 2;
+      const hasActivePlayback = this.activeVoices.size > 0 || this.currentArpNote !== null || this.currentBassNote !== null;
+      if (!hasActivePlayback) this.applyPendingDelayTime(now);
+    }
+    if (this.tremolo) {
+      this.tremolo.frequency.cancelAndHoldAtTime(now);
+      this.tremolo.frequency.rampTo(clampedBpm / 30, MODULATION_RAMP_TIME_SEC, now);
+    }
   }
 
   setChordType(type: 'maj' | 'min' | 'dim' | 'sus'): void {
@@ -261,13 +307,13 @@ class AudioEngine {
     }
     if (this.arpTransitionQueue.length > 0) {
       this.currentArpNote = this.arpTransitionQueue.shift()!;
-      this.synth.triggerAttack(this.currentArpNote, now);
+      this.synth.triggerAttack(this.currentArpNote, now, CHORD_VELOCITY);
       return;
     }
     if (this.arpSequence.length > 0) {
       this.arpIndex = (this.arpIndex + 1) % this.arpSequence.length;
       this.currentArpNote = this.arpSequence[this.arpIndex];
-      this.synth.triggerAttack(this.currentArpNote, now);
+      this.synth.triggerAttack(this.currentArpNote, now, CHORD_VELOCITY);
     }
   }
 
@@ -423,23 +469,23 @@ class AudioEngine {
       this.bassSynth.triggerRelease(t0);
     }
     this.currentBassNote = bassNote;
-    this.bassSynth.triggerAttack(bassNote, t0);
+    this.bassSynth.triggerAttack(bassNote, t0, BASS_VELOCITY);
 
     let trackedNotes = [...noteStrings];
 
     switch (this.state.performanceMode) {
       case 'poly':
-        this.synth.triggerAttack(noteStrings, t0);
+        this.synth.triggerAttack(noteStrings, t0, CHORD_VELOCITY);
         break;
 
       case 'strum': {
         // Strum: play notes with staggered timing using setTimeout (cancelable)
         // First note plays immediately
-        this.synth.triggerAttack(noteStrings[0], t0);
+        this.synth.triggerAttack(noteStrings[0], t0, CHORD_VELOCITY);
         // Subsequent notes are scheduled via setTimeout
         noteStrings.slice(1).forEach((note, i) => {
           const timeout = setTimeout(() => {
-            this.synth?.triggerAttack(note, toneModule!.now());
+            this.synth?.triggerAttack(note, toneModule!.now(), CHORD_VELOCITY);
           }, (i + 1) * 50); // 50ms stagger
           this.scheduledAttacks.push(timeout);
         });
@@ -459,7 +505,7 @@ class AudioEngine {
 
           if (this.arpSequence.length > 0) {
             this.currentArpNote = this.arpSequence[0];
-            this.synth.triggerAttack(this.currentArpNote, t0);
+            this.synth.triggerAttack(this.currentArpNote, t0, CHORD_VELOCITY);
           }
 
           this.scheduleNextArpTick();
@@ -479,11 +525,11 @@ class AudioEngine {
         trackedNotes = [...noteStrings, ...octaveUpNotes];
         octaveUpNotes.forEach(note => this.activeNotesModes.set(note, 'harp'));
         // First note plays immediately
-        this.synth.triggerAttack(trackedNotes[0], t0);
+        this.synth.triggerAttack(trackedNotes[0], t0, HARP_VELOCITY);
         // Subsequent notes are scheduled via setTimeout
         trackedNotes.slice(1).forEach((note, i) => {
           const timeout = setTimeout(() => {
-            this.synth?.triggerAttack(note, toneModule!.now());
+            this.synth?.triggerAttack(note, toneModule!.now(), HARP_VELOCITY);
           }, (i + 1) * 30); // 30ms stagger
           this.scheduledAttacks.push(timeout);
         });
@@ -547,6 +593,7 @@ class AudioEngine {
       this.currentChordNotes = [];
       this.activeNotesModes.clear();
       this.state.currentNote = -1;
+      this.applyPendingDelayTime(now);
     }
   }
 
@@ -564,6 +611,7 @@ class AudioEngine {
     this.activeNotesModes.clear();
     this.activeVoices.clear();
     this.state.currentNote = -1;
+    this.applyPendingDelayTime(now);
   }
 
   releaseSpecificNote(noteToRelease: string): void {
@@ -585,6 +633,9 @@ class AudioEngine {
     }
 
     this.currentChordNotes = Array.from(this.activeVoices.values()).flatMap(v => v.notes);
+    if (this.activeVoices.size === 0 && toneModule) {
+      this.applyPendingDelayTime(toneModule.now());
+    }
   }
 
   getPresetName(): string {
@@ -636,6 +687,9 @@ class AudioEngine {
     this.scheduledAttacks = [];
     this.synth?.dispose();
     this.bassSynth?.dispose();
+    this.compressor?.dispose();
+    this.masterGain?.dispose();
+    this.limiter?.dispose();
     this.reverb?.dispose();
     this.delay?.dispose();
     this.chorus?.dispose();
@@ -647,6 +701,7 @@ class AudioEngine {
     this.currentChordNotes = [];
     this.activeNotesModes.clear();
     this.state.currentNote = -1;
+    this.pendingDelayTime = null;
     this.initialized = false;
   }
 }
