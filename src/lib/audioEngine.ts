@@ -46,6 +46,31 @@ const SOUND_PRESETS = [
 const PERFORMANCE_MODES = ['poly', 'strum', 'arp', 'harp'] as const;
 export type PerformanceMode = typeof PERFORMANCE_MODES[number];
 
+/** Per-effect amounts 0–1. Used by the FX dial precision editor and engine wet levels. */
+export interface SynthSettings {
+  fxDistortion: number;
+  fxReverb: number;
+  fxDelay: number;
+  fxChorus: number;
+  fxPhaser: number;
+  fxTremolo: number;
+}
+
+/** Tuned so that with applyFxSettings() (macro × setting × relativeMultiplier), effective wet
+ *  levels match the original updateFx() multipliers: reverb 0.5, delay 0.3, chorus 0.4, phaser 0.3. */
+export const DEFAULT_SYNTH_SETTINGS: SynthSettings = {
+  fxDistortion: 0,
+  fxReverb: 0.5,   // ×1 → wet 0.5
+  fxDelay: 0.45,   // ×(2/3) → wet 0.3
+  fxChorus: 0.4,   // ×1 → wet 0.4
+  fxPhaser: 0.45,  // ×(2/3) → wet 0.3
+  fxTremolo: 0,
+};
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
 /** Tone.js PolySynth keeps voices in private _voices; not in public API. Used only for getActiveNotes(). */
 interface PolySynthWithVoices {
   _voices?: ToneType.Synth[];
@@ -96,6 +121,8 @@ class AudioEngine {
   /** Delay-time update to apply once playback is idle (avoids glitching while notes are sounding). */
   private pendingDelayTime: number | null = null;
 
+  private settings: SynthSettings = { ...DEFAULT_SYNTH_SETTINGS };
+
   state: SynthState = {
     volume: 0.7,
     sound: 0,
@@ -135,10 +162,10 @@ class AudioEngine {
         attack: 0.003,
         release: 0.12,
       }).connect(this.masterGain);
-      this.reverb = new T.Reverb({ decay: 2.5, wet: 0.3 }).connect(this.compressor);
-      this.delay = new T.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 0.2 }).connect(this.reverb);
-      this.chorus = new T.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 0.3 }).connect(this.delay);
-      this.phaser = new T.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 350, wet: 0.2 }).connect(this.chorus);
+      this.reverb = new T.Reverb({ decay: 2.5, wet: 0 }).connect(this.compressor);
+      this.delay = new T.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 0 }).connect(this.reverb);
+      this.chorus = new T.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 0 }).connect(this.delay);
+      this.phaser = new T.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 350, wet: 0 }).connect(this.chorus);
       this.tremolo = new T.Tremolo({ frequency: 4, depth: 0.6, wet: 0 }).connect(this.phaser).start();
       this.distortion = new T.Distortion({ distortion: 0.1, wet: 0 }).connect(this.tremolo);
 
@@ -158,6 +185,7 @@ class AudioEngine {
 
       this.updateVolume(this.state.volume);
       this.updateBpm(this.state.bpm);
+      this.applyFxSettings();
       this.initialized = true;
       return true;
     } catch (e) {
@@ -231,12 +259,39 @@ class AudioEngine {
     }
   }
 
+  private applyFxSettings(): void {
+    const macro = clamp01(this.state.fx);
+    if (this.distortion) this.distortion.wet.value = macro * clamp01(this.settings.fxDistortion);
+    if (this.reverb) this.reverb.wet.value = macro * clamp01(this.settings.fxReverb) * 1;
+    if (this.delay) this.delay.wet.value = macro * clamp01(this.settings.fxDelay) * (2 / 3);
+    if (this.chorus) this.chorus.wet.value = macro * clamp01(this.settings.fxChorus) * 1;
+    if (this.phaser) this.phaser.wet.value = macro * clamp01(this.settings.fxPhaser) * (2 / 3);
+    if (this.tremolo) this.tremolo.wet.value = macro * clamp01(this.settings.fxTremolo);
+  }
+
+  setSettings(partial: Partial<SynthSettings>): void {
+    const next: SynthSettings = {
+      ...this.settings,
+      ...partial,
+    };
+    this.settings = {
+      fxDistortion: clamp01(next.fxDistortion),
+      fxReverb: clamp01(next.fxReverb),
+      fxDelay: clamp01(next.fxDelay),
+      fxChorus: clamp01(next.fxChorus),
+      fxPhaser: clamp01(next.fxPhaser),
+      fxTremolo: clamp01(next.fxTremolo),
+    };
+    this.applyFxSettings();
+  }
+
+  getSettings(): SynthSettings {
+    return { ...this.settings };
+  }
+
   updateFx(value: number): void {
-    this.state.fx = value;
-    if (this.reverb) this.reverb.wet.value = value * 0.5;
-    if (this.delay) this.delay.wet.value = value * 0.3;
-    if (this.chorus) this.chorus.wet.value = value * 0.4;
-    if (this.phaser) this.phaser.wet.value = value * 0.3;
+    this.state.fx = clamp01(value);
+    this.applyFxSettings();
   }
 
   private applyPendingDelayTime(now: number): void {

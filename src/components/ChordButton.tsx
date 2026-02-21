@@ -1,4 +1,7 @@
+import { useRef, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
+
+const CLEAR_FLAG_DELAY_MS = 400;
 
 type ButtonSize = "xs" | "sm" | "md";
 
@@ -25,15 +28,80 @@ export function ChordButton({
   size = "md",
   className,
 }: ChordButtonProps) {
+  const handledByPointerDown = useRef(false);
+  const clearFlagTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearFlag = useCallback(() => {
+    handledByPointerDown.current = false;
+    if (clearFlagTimeoutRef.current !== null) {
+      clearTimeout(clearFlagTimeoutRef.current);
+      clearFlagTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (clearFlagTimeoutRef.current !== null) {
+        clearTimeout(clearFlagTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (handledByPointerDown.current) {
+        clearFlag();
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      onClick();
+    },
+    [onClick, clearFlag],
+  );
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (e.pointerType !== "mouse") {
+        e.preventDefault();
+        if (clearFlagTimeoutRef.current !== null) {
+          clearTimeout(clearFlagTimeoutRef.current);
+          clearFlagTimeoutRef.current = null;
+        }
+        handledByPointerDown.current = true;
+        onClick();
+      }
+    },
+    [onClick],
+  );
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (e.pointerType !== "mouse") {
+        clearFlagTimeoutRef.current = setTimeout(() => {
+          clearFlagTimeoutRef.current = null;
+          handledByPointerDown.current = false;
+        }, CLEAR_FLAG_DELAY_MS);
+      }
+    },
+    [],
+  );
+
+  const handlePointerCancel = useCallback(() => {
+    if (clearFlagTimeoutRef.current !== null) {
+      clearTimeout(clearFlagTimeoutRef.current);
+      clearFlagTimeoutRef.current = null;
+    }
+    handledByPointerDown.current = false;
+  }, []);
+
   return (
     <button
-      onClick={onClick}
-      onPointerDown={(e) => {
-        if (e.pointerType !== 'mouse') {
-          e.preventDefault();
-          onClick();
-        }
-      }}
+      type="button"
+      onClick={handleClick}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
       className={cn(
         "synth-button select-none",
         "flex items-center justify-center",

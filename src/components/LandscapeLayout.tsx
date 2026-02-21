@@ -3,6 +3,8 @@ import {
   PerformanceMode,
   PERFORMANCE_MODES,
   NOTE_NAMES,
+  SOUND_PRESETS,
+  SynthSettings,
 } from "@/lib/audioEngine";
 import { RotaryDial } from "./RotaryDial";
 import { ChordButton } from "./ChordButton";
@@ -42,6 +44,8 @@ interface LandscapeLayoutProps {
   handleNoteOn: (note: number) => void;
   handleNoteOff: (note: number) => void;
   getPresetName: () => string;
+  settings: SynthSettings;
+  onSettingsChange: (partial: Partial<SynthSettings>) => void;
 }
 
 export function LandscapeLayout({
@@ -76,6 +80,8 @@ export function LandscapeLayout({
   handleNoteOn,
   handleNoteOff,
   getPresetName,
+  settings,
+  onSettingsChange,
 }: LandscapeLayoutProps) {
   const [isControlsOpen, setIsControlsOpen] = useState(false);
 
@@ -226,6 +232,11 @@ export function LandscapeLayout({
             <RotaryDial
               label="Volume"
               value={volume}
+              min={0}
+              max={1}
+              step={0.01}
+              precisionEditor="number"
+              precisionUnit="percent"
               onChange={(v) => {
                 ensureAudio();
                 setVolume(v);
@@ -239,6 +250,8 @@ export function LandscapeLayout({
               min={0}
               max={7}
               step={1}
+              precisionEditor="list"
+              precisionOptions={SOUND_PRESETS.map((p, i) => ({ value: i, label: p.name }))}
               onChange={(v) => {
                 ensureAudio();
                 setSound(v);
@@ -249,6 +262,19 @@ export function LandscapeLayout({
             <RotaryDial
               label="FX"
               value={fx}
+              min={0}
+              max={1}
+              step={0.01}
+              precisionEditor="fxSliders"
+              fxSettings={{
+                fxDistortion: settings.fxDistortion,
+                fxReverb: settings.fxReverb,
+                fxDelay: settings.fxDelay,
+                fxChorus: settings.fxChorus,
+                fxPhaser: settings.fxPhaser,
+                fxTremolo: settings.fxTremolo,
+              }}
+              onFxSettingsChange={onSettingsChange}
               onChange={(v) => {
                 ensureAudio();
                 setFx(v);
@@ -262,6 +288,8 @@ export function LandscapeLayout({
               min={0}
               max={11}
               step={1}
+              precisionEditor="list"
+              precisionOptions={NOTE_NAMES.map((n, i) => ({ value: i, label: n }))}
               onChange={(v) => {
                 ensureAudio();
                 setKey(v);
@@ -275,6 +303,7 @@ export function LandscapeLayout({
               min={40}
               max={300}
               step={1}
+              precisionEditor="number"
               onChange={(v) => {
                 ensureAudio();
                 setBpm(v);
@@ -285,6 +314,10 @@ export function LandscapeLayout({
             <RotaryDial
               label="Chord"
               value={chordVoicing}
+              min={0}
+              max={1}
+              step={0.01}
+              precisionEditor="number"
               onChange={(v) => {
                 ensureAudio();
                 setChordVoicing(v);
@@ -294,6 +327,10 @@ export function LandscapeLayout({
             <RotaryDial
               label="Bass"
               value={bassVoicing}
+              min={0}
+              max={1}
+              step={0.01}
+              precisionEditor="number"
               onChange={(v) => {
                 ensureAudio();
                 setBassVoicing(v);
