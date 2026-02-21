@@ -1,7 +1,12 @@
 import { useCallback, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import {
+  DialPrecisionEditor,
+  type PrecisionOption,
+  type FxSettings,
+} from "./DialPrecisionEditor";
 
-interface RotaryDialProps {
+interface RotaryDialBaseProps {
   label: string;
   value: number;
   min?: number;
@@ -11,7 +16,40 @@ interface RotaryDialProps {
   displayValue?: string;
   size?: "xs" | "sm" | "md" | "lg";
   className?: string;
+  /** When "percent", the number modal shows 0–100 and converts to 0–1 (only with precisionEditor="number") */
+  precisionUnit?: "percent";
+  /** For precisionEditor="fxSliders": per-effect amounts and update callback */
+  fxSettings?: FxSettings;
+  onFxSettingsChange?: (partial: Partial<FxSettings>) => void;
 }
+
+interface RotaryDialWithNumberEditor extends RotaryDialBaseProps {
+  precisionEditor: "number";
+  precisionOptions?: never;
+}
+
+interface RotaryDialWithListEditor extends RotaryDialBaseProps {
+  precisionEditor: "list";
+  precisionOptions: PrecisionOption[];
+}
+
+interface RotaryDialWithFxSlidersEditor extends RotaryDialBaseProps {
+  precisionEditor: "fxSliders";
+  precisionOptions?: never;
+  fxSettings: FxSettings; // required when fxSliders
+  onFxSettingsChange: (partial: Partial<FxSettings>) => void;
+}
+
+interface RotaryDialWithoutEditor extends RotaryDialBaseProps {
+  precisionEditor?: undefined;
+  precisionOptions?: never;
+}
+
+export type RotaryDialProps =
+  | RotaryDialWithNumberEditor
+  | RotaryDialWithListEditor
+  | RotaryDialWithFxSlidersEditor
+  | RotaryDialWithoutEditor;
 
 export function RotaryDial({
   label,
@@ -23,10 +61,19 @@ export function RotaryDial({
   displayValue,
   size = "md",
   className,
+  precisionEditor,
+  precisionOptions,
+  precisionUnit,
+  fxSettings,
+  onFxSettingsChange,
 }: RotaryDialProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
   const startY = useRef(0);
   const startValue = useRef(0);
+  /** True if pointer moved (so we treat as drag, not click); opening editor only when value unchanged */
+  const hasMovedRef = useRef(false);
+  const dialRef = useRef<HTMLDivElement>(null);
   /** Track a single active pointer so keyboard and controls can be used at the same time */
   const activePointerId = useRef<number | null>(null);
 
@@ -67,6 +114,7 @@ export function RotaryDial({
       activePointerId.current = e.pointerId;
       startY.current = e.clientY;
       startValue.current = value;
+      hasMovedRef.current = false;
       setIsDragging(true);
       e.currentTarget.setPointerCapture(e.pointerId);
     },
@@ -76,6 +124,7 @@ export function RotaryDial({
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (activePointerId.current !== e.pointerId) return;
+      hasMovedRef.current = true;
       e.preventDefault();
       updateFromClientY(e.clientY);
     },
@@ -90,14 +139,18 @@ export function RotaryDial({
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      const wasClick = precisionEditor && !hasMovedRef.current;
       finishDrag(e.pointerId);
       try {
         e.currentTarget.releasePointerCapture(e.pointerId);
       } catch {
         // Capture may already be released.
       }
+      if (wasClick) {
+        setEditorOpen(true);
+      }
     },
-    [finishDrag],
+    [finishDrag, precisionEditor],
   );
 
   const handlePointerCancel = useCallback(
@@ -116,6 +169,11 @@ export function RotaryDial({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (precisionEditor && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        setEditorOpen(true);
+        return;
+      }
       const stepAmount = (max - min) * 0.05;
       if (e.key === "ArrowUp" || e.key === "ArrowRight") {
         e.preventDefault();
@@ -125,18 +183,21 @@ export function RotaryDial({
         onChange(Math.max(min, Math.round((value - stepAmount) / step) * step));
       }
     },
-    [max, min, onChange, step, value],
+    [max, min, onChange, step, value, precisionEditor],
   );
 
   return (
     <div className={cn("flex flex-col items-center gap-2", className)}>
       <div
+        ref={dialRef}
         role="slider"
         tabIndex={0}
         aria-valuemin={min}
         aria-valuemax={max}
         aria-valuenow={value}
         aria-label={label}
+        aria-haspopup={precisionEditor ? "dialog" : undefined}
+        aria-keyshortcuts={precisionEditor ? "Enter Space" : undefined}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -162,6 +223,49 @@ export function RotaryDial({
           />
         </div>
       </div>
+      {editorOpen && precisionEditor === "number" && (
+        <DialPrecisionEditor
+          variant="number"
+          label={label}
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          unit={precisionUnit}
+          onApply={(v) => {
+            onChange(v);
+            setEditorOpen(false);
+          }}
+          onClose={() => setEditorOpen(false)}
+          triggerRef={dialRef}
+        />
+      )}
+      {editorOpen && precisionEditor === "fxSliders" && fxSettings && onFxSettingsChange && (
+        <DialPrecisionEditor
+          variant="fxSliders"
+          label={label}
+          fxMacro={value}
+          onFxMacroChange={onChange}
+          fxSettings={fxSettings}
+          onFxSettingsChange={onFxSettingsChange}
+          onClose={() => setEditorOpen(false)}
+          triggerRef={dialRef}
+        />
+      )}
+      {editorOpen && precisionEditor === "list" && precisionOptions && (
+        <DialPrecisionEditor
+          variant="list"
+          label={label}
+          value={value}
+          options={precisionOptions}
+          onApply={(v) => {
+            onChange(v);
+            setEditorOpen(false);
+          }}
+          onClose={() => setEditorOpen(false)}
+          triggerRef={dialRef}
+        />
+      )}
       <div className="text-center">
         <div
           className={cn(

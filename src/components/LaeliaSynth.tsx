@@ -6,6 +6,9 @@ import {
   PerformanceMode,
   PERFORMANCE_MODES,
   NOTE_NAMES,
+  SOUND_PRESETS,
+  SynthSettings,
+  DEFAULT_SYNTH_SETTINGS,
 } from "@/lib/audioEngine";
 import { RotaryDial } from "./RotaryDial";
 import { ChordButton } from "./ChordButton";
@@ -45,6 +48,9 @@ export function LaeliaSynth() {
   );
   const [extensions, setExtensions] = useState<Set<"6" | "m7" | "M7" | "9">>(
     new Set(),
+  );
+  const [settings, setSettings] = useState<SynthSettings>(
+    () => DEFAULT_SYNTH_SETTINGS,
   );
 
   const unlockAudio = useCallback(() => audioEngine.unlockAudio(), []);
@@ -125,6 +131,10 @@ export function LaeliaSynth() {
   // 1-4: Performance modes, 5-8: Chord type, 9-=: Extensions
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target;
+      if (!target || !(target instanceof HTMLElement)) return;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+      if (target.closest?.("[role=dialog]")) return;
       let handled = false;
       switch (e.code) {
         // Performance modes (1-4)
@@ -215,6 +225,22 @@ export function LaeliaSynth() {
   useEffect(() => {
     if (isReady) audioEngine.setPerformanceMode(performanceMode);
   }, [performanceMode, isReady]);
+
+  useEffect(() => {
+    if (!isReady) return;
+    const next = audioEngine.getSettings();
+    queueMicrotask(() => setSettings(next));
+  }, [isReady]);
+
+  const handleSettingsChange = useCallback(
+    (partial: Partial<SynthSettings>) => {
+      void ensureAudio().then(() => {
+        audioEngine.setSettings(partial);
+        setSettings(audioEngine.getSettings());
+      });
+    },
+    [ensureAudio],
+  );
 
   useEffect(() => {
     if (!isReady) return;
@@ -334,6 +360,8 @@ export function LaeliaSynth() {
         handleNoteOn={handleNoteOn}
         handleNoteOff={handleNoteOff}
         getPresetName={() => audioEngine.getPresetName()}
+        settings={settings}
+        onSettingsChange={handleSettingsChange}
       />
     );
   }
@@ -418,6 +446,11 @@ export function LaeliaSynth() {
             <RotaryDial
               label="Volume"
               value={volume}
+              min={0}
+              max={1}
+              step={0.01}
+              precisionEditor="number"
+              precisionUnit="percent"
               onChange={(v) => {
                 ensureAudio();
                 setVolume(v);
@@ -431,6 +464,8 @@ export function LaeliaSynth() {
               min={0}
               max={7}
               step={1}
+              precisionEditor="list"
+              precisionOptions={SOUND_PRESETS.map((p, i) => ({ value: i, label: p.name }))}
               onChange={(v) => {
                 ensureAudio();
                 setSound(v);
@@ -441,6 +476,19 @@ export function LaeliaSynth() {
             <RotaryDial
               label="FX"
               value={fx}
+              min={0}
+              max={1}
+              step={0.01}
+              precisionEditor="fxSliders"
+              fxSettings={{
+                fxDistortion: settings.fxDistortion,
+                fxReverb: settings.fxReverb,
+                fxDelay: settings.fxDelay,
+                fxChorus: settings.fxChorus,
+                fxPhaser: settings.fxPhaser,
+                fxTremolo: settings.fxTremolo,
+              }}
+              onFxSettingsChange={handleSettingsChange}
               onChange={(v) => {
                 ensureAudio();
                 setFx(v);
@@ -454,6 +502,8 @@ export function LaeliaSynth() {
               min={0}
               max={11}
               step={1}
+              precisionEditor="list"
+              precisionOptions={NOTE_NAMES.map((n, i) => ({ value: i, label: n }))}
               onChange={(v) => {
                 ensureAudio();
                 setKey(v);
@@ -467,6 +517,7 @@ export function LaeliaSynth() {
               min={40}
               max={300}
               step={1}
+              precisionEditor="number"
               onChange={(v) => {
                 ensureAudio();
                 setBpm(v);
@@ -570,6 +621,10 @@ export function LaeliaSynth() {
                 <RotaryDial
                   label="Chord"
                   value={chordVoicing}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  precisionEditor="number"
                   onChange={(v) => {
                     ensureAudio();
                     setChordVoicing(v);
@@ -579,6 +634,10 @@ export function LaeliaSynth() {
                 <RotaryDial
                   label="Bass"
                   value={bassVoicing}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  precisionEditor="number"
                   onChange={(v) => {
                     ensureAudio();
                     setBassVoicing(v);

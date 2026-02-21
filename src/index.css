@@ -133,6 +133,65 @@
   }
 }
 
+/* FX modal range sliders: consistent height and look across Safari, Chrome, Firefox.
+   Touch-friendly: 44px min height and touch-action: none so mobile doesn't steal the gesture. */
+.dial-modal-range {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 44px;
+  height: 44px;
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.dial-modal-range::-webkit-slider-runnable-track {
+  height: 10px;
+  border-radius: 5px;
+  background: linear-gradient(to right,
+      var(--color-primary) 0%,
+      var(--color-primary) var(--range-value, 0%),
+      var(--color-input) var(--range-value, 0%),
+      var(--color-input) 100%);
+  border: 1px solid var(--color-border);
+}
+
+.dial-modal-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  border: 2px solid var(--color-border);
+  box-shadow: 0 0 8px hsl(var(--synth-glow) / 0.5);
+  margin-top: -9px;
+  cursor: pointer;
+}
+
+.dial-modal-range::-moz-range-track {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--color-input);
+  border: 1px solid var(--color-border);
+}
+
+.dial-modal-range::-moz-range-progress {
+  height: 10px;
+  border-radius: 5px 0 0 5px;
+  background: var(--color-primary);
+}
+
+.dial-modal-range::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  border: 2px solid var(--color-border);
+  box-shadow: 0 0 8px hsl(var(--synth-glow) / 0.5);
+  cursor: pointer;
+}
+
 @layer components {
   .synth-panel {
     @apply bg-card rounded-2xl border border-border shadow-2xl;
