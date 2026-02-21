@@ -6,6 +6,9 @@ import {
   type FxSettings,
 } from "./DialPrecisionEditor";
 
+/** Only treat as drag (skip opening precision modal) when pointer moves past this many px from down. */
+const DIAL_CLICK_MOVE_THRESHOLD_PX = 2;
+
 interface RotaryDialBaseProps {
   label: string;
   value: number;
@@ -69,9 +72,10 @@ export function RotaryDial({
 }: RotaryDialProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
+  const startX = useRef(0);
   const startY = useRef(0);
   const startValue = useRef(0);
-  /** True if pointer moved (so we treat as drag, not click); opening editor only when value unchanged */
+  /** True only after pointer moved past threshold (so we treat as drag, not click). */
   const hasMovedRef = useRef(false);
   const dialRef = useRef<HTMLDivElement>(null);
   /** Track a single active pointer so keyboard and controls can be used at the same time */
@@ -112,6 +116,7 @@ export function RotaryDial({
       e.preventDefault();
 
       activePointerId.current = e.pointerId;
+      startX.current = e.clientX;
       startY.current = e.clientY;
       startValue.current = value;
       hasMovedRef.current = false;
@@ -124,11 +129,22 @@ export function RotaryDial({
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (activePointerId.current !== e.pointerId) return;
-      hasMovedRef.current = true;
-      e.preventDefault();
-      updateFromClientY(e.clientY);
+      if (!hasMovedRef.current) {
+        const dx = e.clientX - startX.current;
+        const dy = e.clientY - startY.current;
+        if (Math.hypot(dx, dy) > DIAL_CLICK_MOVE_THRESHOLD_PX) {
+          hasMovedRef.current = true;
+          // Reset drag origin so the first value change is small (avoids 4–6% jump)
+          startY.current = e.clientY;
+          startValue.current = value;
+        }
+      }
+      if (hasMovedRef.current) {
+        e.preventDefault();
+        updateFromClientY(e.clientY);
+      }
     },
-    [updateFromClientY],
+    [updateFromClientY, value],
   );
 
   const finishDrag = useCallback((pointerId: number) => {
@@ -240,18 +256,21 @@ export function RotaryDial({
           triggerRef={dialRef}
         />
       )}
-      {editorOpen && precisionEditor === "fxSliders" && fxSettings && onFxSettingsChange && (
-        <DialPrecisionEditor
-          variant="fxSliders"
-          label={label}
-          fxMacro={value}
-          onFxMacroChange={onChange}
-          fxSettings={fxSettings}
-          onFxSettingsChange={onFxSettingsChange}
-          onClose={() => setEditorOpen(false)}
-          triggerRef={dialRef}
-        />
-      )}
+      {editorOpen &&
+        precisionEditor === "fxSliders" &&
+        fxSettings &&
+        onFxSettingsChange && (
+          <DialPrecisionEditor
+            variant="fxSliders"
+            label={label}
+            fxMacro={value}
+            onFxMacroChange={onChange}
+            fxSettings={fxSettings}
+            onFxSettingsChange={onFxSettingsChange}
+            onClose={() => setEditorOpen(false)}
+            triggerRef={dialRef}
+          />
+        )}
       {editorOpen && precisionEditor === "list" && precisionOptions && (
         <DialPrecisionEditor
           variant="list"
