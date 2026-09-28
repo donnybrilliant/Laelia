@@ -19,6 +19,8 @@ import { Visualizer } from "./Visualizer";
 import { LandscapeLayout } from "./LandscapeLayout";
 import { useLandscapeMobile } from "@/hooks/use-landscape-mobile";
 import { useKeyLabels } from "@/hooks/use-key-labels";
+import { useMidi } from "@/hooks/use-midi";
+import { MidiButton } from "./MidiButton";
 
 export function LaeliaSynth() {
   const isLandscapeMobile = useLandscapeMobile();
@@ -31,6 +33,7 @@ export function LaeliaSynth() {
     Array<{ note: string; mode: PerformanceMode }>
   >([]);
   const pollRef = useRef<number | null>(null);
+  const heldInputsRef = useRef(new Map<string, { note: number; velocity: number }>());
   /** Track whether we've started initializing audio (to avoid multiple init calls) */
   const initStartedRef = useRef(false);
 
@@ -254,23 +257,23 @@ export function LaeliaSynth() {
     };
   }, [isReady]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const inputs = heldInputsRef.current;
+    return () => {
+      // Input hook cleanups run after this effect; they must not release disposed voices.
+      inputs.clear();
       audioEngine.dispose();
-    },
-    [],
-  );
+    };
+  }, []);
 
   // Safety net: only release when the window actually loses focus or the tab is hidden.
   // Do not release on mouseup/touchend/mouseleave—that would cancel notes when the user
   // clicks a button or touches a control while still holding a key (keyboard or finger).
   useEffect(() => {
     const releaseEverything = () => {
-      setPressedKeys((prev) => {
-        if (prev.size === 0) return prev;
-        audioEngine.releaseNote();
-        return new Set();
-      });
+      heldInputsRef.current.clear();
+      audioEngine.releaseNote();
+      setPressedKeys(new Set());
       setCurrentChord("");
     };
 
@@ -288,38 +291,58 @@ export function LaeliaSynth() {
   }, []);
 
   const handleNoteOn = useCallback(
-    (note: number) => {
+    (note: number, velocity = 1, source = `keyboard:${note}`): boolean => {
       // Trigger audio init on first interaction (non-blocking)
       triggerAudioInit();
 
       // Only update visual state and play audio if engine is ready
-      if (!audioEngine.isReady()) return;
+      if (!audioEngine.isReady()) return false;
 
-      setPressedKeys((prev) => new Set(prev).add(note));
-      const chordName = audioEngine.playNote(note);
+      // Keep source ownership outside React state updaters (which may run twice).
+      const inputs = heldInputsRef.current;
+      inputs.delete(source);
+      inputs.set(source, { note, velocity });
+      setPressedKeys(new Set(Array.from(inputs.values(), input => input.note)));
+      const chordName = audioEngine.playNote(note, velocity);
       setCurrentChord(chordName);
+      return true;
     },
     [triggerAudioInit],
   );
 
-  const handleNoteOff = useCallback((note: number) => {
-    setPressedKeys((prev) => {
-      const next = new Set(prev);
-      next.delete(note);
-
-      if (next.size === 0) {
-        // All keys released - full release
-        audioEngine.releaseNote();
-        setCurrentChord("");
-      } else {
-        // Individual key released - release just that voice
-        // This is important for arp mode to update its sequence
-        audioEngine.releaseKey(note);
-      }
-
-      return next;
-    });
+  const handleNoteOff = useCallback((note: number, source = `keyboard:${note}`) => {
+    const inputs = heldInputsRef.current;
+    if (!inputs.delete(source)) return;
+    const remaining = Array.from(inputs.values());
+    setPressedKeys(new Set(remaining.map(input => input.note)));
+    if (remaining.some(input => input.note === note)) return;
+    if (remaining.length === 0) {
+      audioEngine.releaseNote();
+      setCurrentChord("");
+    } else if (audioEngine.state.performanceMode !== "arp" && audioEngine.state.currentNote === note) {
+      // Return to the previous held chord, including one held by a sustain pedal.
+      const previous = remaining[remaining.length - 1];
+      setCurrentChord(audioEngine.playNote(previous.note, previous.velocity));
+    } else {
+      audioEngine.releaseKey(note);
+    }
   }, []);
+
+  const handleMidiControl = useCallback((controller: number, value: number) => {
+    if (controller === 7) setVolume(value);
+    if (controller === 1) setFx(value);
+  }, []);
+
+  const midi = useMidi({
+    ensureAudio,
+    noteOn: handleNoteOn,
+    noteOff: handleNoteOff,
+    controlChange: handleMidiControl,
+  });
+  const keyboardNotes = new Set(Array.from(pressedKeys, note =>
+    note >= 0 && note <= 12 ? note : ((note % 12) + 12) % 12,
+  ));
+  const midiHidden = pressedKeys.size > 0 || activeNotes.length > 0;
 
   const handleRemoveActiveNote = useCallback((note: string) => {
     audioEngine.releaseSpecificNote(note);
@@ -332,7 +355,9 @@ export function LaeliaSynth() {
         isReady={isReady}
         isInitializing={isInitializing}
         currentChord={currentChord}
-        pressedKeys={pressedKeys}
+        pressedKeys={keyboardNotes}
+        midi={midi}
+        midiHidden={midiHidden}
         activeNotes={activeNotes}
         onPointerDownForAudio={triggerAudioInit}
         handleRemoveActiveNote={handleRemoveActiveNote}
@@ -369,7 +394,7 @@ export function LaeliaSynth() {
   return (
     <div className="min-h-screen w-screen flex items-center justify-center p-2 sm:p-4 overflow-auto">
       <div className="synth-panel w-full max-w-4xl flex flex-col p-3 sm:p-4 md:p-6 gap-3 sm:gap-4">
-        <div className="flex items-center justify-between">
+        <div className="flex min-h-8 items-center justify-between">
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -422,6 +447,7 @@ export function LaeliaSynth() {
               ))}
             </div>
           )}
+          <MidiButton connection={midi} hidden={midiHidden} />
         </div>
 
         <div className="flex flex-col gap-4">
@@ -649,7 +675,7 @@ export function LaeliaSynth() {
                 <Keyboard
                   onNoteOn={handleNoteOn}
                   onNoteOff={handleNoteOff}
-                  activeNotes={pressedKeys}
+                  activeNotes={keyboardNotes}
                   onPointerDownForAudio={triggerAudioInit}
                 />
               </div>

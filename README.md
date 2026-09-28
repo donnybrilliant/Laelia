@@ -19,6 +19,21 @@ So this isn’t a clone; it’s just how I picture the thing from that one video
 
 Tech: React, Vite, TypeScript, [Tone.js](https://tonejs.github.io/), Tailwind. No backend. No account. No tracking. Just vibes and Web Audio.
 
+## MIDI keyboards
+
+Connect a USB MIDI keyboard, then click the MIDI socket icon at the right of the header and allow browser access. There is no setup menu: Laelia listens to all connected MIDI inputs and channels, and picks up keyboards plugged in later. Click the icon again to see the connection status or retry. It appears while idle; playing notes takes its place, including the sound's release tail.
+
+Every key triggers a **chord**, using the selected chord type, extensions, voicing, key transposition, and performance mode. MIDI preserves the played octave and velocity. The on-screen keys highlight the corresponding pitch classes. Poly, strum, and harp play the latest held chord, returning to the previous held chord on release; arp combines held chords. The bass stays in the range selected by the Bass dial.
+
+- Sustain pedal (**CC64**) holds chords until released.
+- Volume (**CC7**) controls the Volume dial.
+- Modulation wheel (**CC1**) controls the FX dial.
+- Unplugging a keyboard, leaving the app, and all-notes-off/all-sound-off messages release its notes.
+
+Other knobs and pads can send MIDI too, but their assignments vary by controller. Custom button mappings and MIDI Learn are not included yet.
+
+Web MIDI needs HTTPS (or localhost) and a supported browser, such as desktop Chrome/Edge or Android Chrome with compatible USB/OTG hardware. Safari and iOS PWAs do not support Web MIDI. Unsupported browsers show an explanation when the icon is tapped. Audio still needs the initial click/tap; a hardware key alone cannot unlock it.
+
 ---
 
 ## Add as PWA (install to home screen)
@@ -44,6 +59,8 @@ Then open the URL (e.g. `http://localhost:5173`), tap to unlock audio, and play.
 npm run build
 npm run preview
 ```
+
+**MIDI protocol tests** (Node.js 22.18+): `node --test tests/midi-input.test.ts`
 
 ---
 

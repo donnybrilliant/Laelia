@@ -11,12 +11,16 @@ import { ChordButton } from "./ChordButton";
 import { Keyboard } from "./Keyboard";
 import { ModeButton } from "./ModeButton";
 import { Visualizer } from "./Visualizer";
+import { MidiButton } from "./MidiButton";
+import type { MidiConnection } from "@/hooks/use-midi";
 
 interface LandscapeLayoutProps {
   isReady: boolean;
   isInitializing: boolean;
   currentChord: string;
   pressedKeys: Set<number>;
+  midi: MidiConnection;
+  midiHidden: boolean;
   activeNotes: Array<{ note: string; mode: PerformanceMode }>;
   onPointerDownForAudio?: () => void;
   handleRemoveActiveNote: (note: string) => void;
@@ -53,6 +57,8 @@ export function LandscapeLayout({
   isInitializing,
   currentChord,
   pressedKeys,
+  midi,
+  midiHidden,
   activeNotes,
   onPointerDownForAudio,
   handleRemoveActiveNote,
@@ -88,11 +94,11 @@ export function LandscapeLayout({
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
       {/* Top bar - Display with visualizer + active notes */}
-      <div className="flex items-center gap-2 px-2 py-1 shrink-0">
+      <div className="relative z-20 flex items-center gap-2 px-2 py-1 shrink-0">
         {/* Display area with visualizer overlay - stretches full width */}
-        <div className="synth-display relative flex items-center px-3 py-1.5 flex-1 min-w-0 min-h-[40px] overflow-hidden">
+        <div className="synth-display relative flex items-center px-3 py-1 flex-1 min-w-0 min-h-[40px]">
           {/* Visualizer background */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-50">
+          <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-lg opacity-50">
             <Visualizer
               isActive={isReady}
               hasActiveNotes={activeNotes.length > 0}
@@ -160,6 +166,7 @@ export function LandscapeLayout({
 
             {/* Right side: Active notes display - inside the display panel */}
             <div className="flex items-center gap-1 font-mono text-xs min-w-[80px] justify-end">
+              <MidiButton connection={midi} hidden={midiHidden} />
               {activeNotes.map(({ note, mode }, i) => (
                 <button
                   key={`${note}-${i}`}

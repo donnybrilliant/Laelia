@@ -111,7 +111,7 @@ class AudioEngine {
   private currentChordNotes: string[] = [];
   private activeNotesModes: Map<string, PerformanceMode> = new Map();
   /** Track notes per key index for proper cleanup when switching chords */
-  private activeVoices: Map<number, { notes: string[]; bassNote: string }> = new Map();
+  private activeVoices: Map<number, { notes: string[]; bassNote: string; velocity: number }> = new Map();
   /** For arp mode: the full sequence of notes to arpeggiate (sorted, deduplicated from all held keys) */
   private arpSequence: string[] = [];
   /** For arp mode: notes we're transitioning TO (for smooth scale transitions) */
@@ -351,7 +351,7 @@ class AudioEngine {
 
   /** Convert note string to MIDI number for sorting */
   private noteToMidi(note: string): number {
-    const match = note.match(/^([A-G]#?)(\d+)$/);
+    const match = note.match(/^([A-G]#?)(-?\d+)$/);
     if (!match) return 0;
     const [, noteName, octaveStr] = match;
     const noteIndex = NOTE_NAMES.indexOf(noteName);
@@ -367,14 +367,22 @@ class AudioEngine {
     }
     if (this.arpTransitionQueue.length > 0) {
       this.currentArpNote = this.arpTransitionQueue.shift()!;
-      this.synth.triggerAttack(this.currentArpNote, now, CHORD_VELOCITY);
+      this.synth.triggerAttack(this.currentArpNote, now, this.getArpVelocity(this.currentArpNote));
       return;
     }
     if (this.arpSequence.length > 0) {
       this.arpIndex = (this.arpIndex + 1) % this.arpSequence.length;
       this.currentArpNote = this.arpSequence[this.arpIndex];
-      this.synth.triggerAttack(this.currentArpNote, now, CHORD_VELOCITY);
+      this.synth.triggerAttack(this.currentArpNote, now, this.getArpVelocity(this.currentArpNote));
     }
+  }
+
+  private getArpVelocity(note: string): number {
+    let velocity = 0;
+    for (const voice of this.activeVoices.values()) {
+      if (voice.notes.includes(note)) velocity = Math.max(velocity, voice.velocity);
+    }
+    return CHORD_VELOCITY * velocity;
   }
 
   /** Schedule the next arp tick using current BPM (loop continues with current tempo) */
@@ -474,7 +482,9 @@ class AudioEngine {
     for (let i = 0; i < voicing; i++) {
       if (notes.length > 0) notes[i % notes.length] += 12;
     }
-    return notes.sort((a, b) => a - b);
+    // Keep extreme MIDI keys/voicings within the playable MIDI range.
+    return [...new Set(notes.map(note => note > 127 ? note - 12 * Math.ceil((note - 127) / 12) : note))]
+      .sort((a, b) => a - b);
   }
 
   private getChordName(rootMidi: number): string {
@@ -494,8 +504,9 @@ class AudioEngine {
     return `${rootNote}${typeName}${extName}`;
   }
 
-  playNote(noteIndex: number): string {
+  playNote(noteIndex: number, velocity = 1): string {
     if (!this.isReady() || !this.synth || !this.bassSynth) return '';
+    velocity = clamp01(velocity);
 
     // For non-arp modes, only one voice should play at a time (like a traditional synth)
     if (this.state.performanceMode !== 'arp') {
@@ -517,7 +528,7 @@ class AudioEngine {
     // generate rapid re-triggers.
     const t0 = toneModule!.now();
     this.state.currentNote = noteIndex;
-    const rootMidi = 48 + noteIndex + this.state.key;
+    const rootMidi = Math.max(0, Math.min(127, 48 + noteIndex + this.state.key));
     const chordMidi = this.buildChord(rootMidi);
     const noteStrings = chordMidi.map((m) => this.midiToNote(m));
     noteStrings.forEach(note => this.activeNotesModes.set(note, this.state.performanceMode));
@@ -529,23 +540,23 @@ class AudioEngine {
       this.bassSynth.triggerRelease(t0);
     }
     this.currentBassNote = bassNote;
-    this.bassSynth.triggerAttack(bassNote, t0, BASS_VELOCITY);
+    this.bassSynth.triggerAttack(bassNote, t0, BASS_VELOCITY * velocity);
 
     let trackedNotes = [...noteStrings];
 
     switch (this.state.performanceMode) {
       case 'poly':
-        this.synth.triggerAttack(noteStrings, t0, CHORD_VELOCITY);
+        this.synth.triggerAttack(noteStrings, t0, CHORD_VELOCITY * velocity);
         break;
 
       case 'strum': {
         // Strum: play notes with staggered timing using setTimeout (cancelable)
         // First note plays immediately
-        this.synth.triggerAttack(noteStrings[0], t0, CHORD_VELOCITY);
+        this.synth.triggerAttack(noteStrings[0], t0, CHORD_VELOCITY * velocity);
         // Subsequent notes are scheduled via setTimeout
         noteStrings.slice(1).forEach((note, i) => {
           const timeout = setTimeout(() => {
-            this.synth?.triggerAttack(note, toneModule!.now(), CHORD_VELOCITY);
+            this.synth?.triggerAttack(note, toneModule!.now(), CHORD_VELOCITY * velocity);
           }, (i + 1) * 50); // 50ms stagger
           this.scheduledAttacks.push(timeout);
         });
@@ -554,18 +565,20 @@ class AudioEngine {
 
       case 'arp': {
         // Track this voice first so updateArpSequence sees it
-        this.activeVoices.set(noteIndex, { notes: trackedNotes, bassNote });
+        this.activeVoices.set(noteIndex, { notes: trackedNotes, bassNote, velocity });
 
         const isFirstKey = this.activeVoices.size === 1;
 
         if (isFirstKey) {
+          // Repeated MIDI note-ons must replace the existing timer, not start another loop.
+          this.stopArp();
           // First key - start the arpeggiator
           this.arpSequence = this.getAllArpNotes();
           this.arpIndex = 0;
 
           if (this.arpSequence.length > 0) {
             this.currentArpNote = this.arpSequence[0];
-            this.synth.triggerAttack(this.currentArpNote, t0, CHORD_VELOCITY);
+            this.synth.triggerAttack(this.currentArpNote, t0, this.getArpVelocity(this.currentArpNote));
           }
 
           this.scheduleNextArpTick();
@@ -581,15 +594,15 @@ class AudioEngine {
 
       case 'harp': {
         // Harp: play notes with staggered timing including octave up, using setTimeout (cancelable)
-        const octaveUpNotes = chordMidi.map((m) => this.midiToNote(m + 12));
+        const octaveUpNotes = chordMidi.filter(m => m + 12 <= 127).map((m) => this.midiToNote(m + 12));
         trackedNotes = [...noteStrings, ...octaveUpNotes];
         octaveUpNotes.forEach(note => this.activeNotesModes.set(note, 'harp'));
         // First note plays immediately
-        this.synth.triggerAttack(trackedNotes[0], t0, HARP_VELOCITY);
+        this.synth.triggerAttack(trackedNotes[0], t0, HARP_VELOCITY * velocity);
         // Subsequent notes are scheduled via setTimeout
         trackedNotes.slice(1).forEach((note, i) => {
           const timeout = setTimeout(() => {
-            this.synth?.triggerAttack(note, toneModule!.now(), HARP_VELOCITY);
+            this.synth?.triggerAttack(note, toneModule!.now(), HARP_VELOCITY * velocity);
           }, (i + 1) * 30); // 30ms stagger
           this.scheduledAttacks.push(timeout);
         });
@@ -598,7 +611,7 @@ class AudioEngine {
     }
 
     // Track this voice's notes for proper cleanup
-    this.activeVoices.set(noteIndex, { notes: trackedNotes, bassNote });
+    this.activeVoices.set(noteIndex, { notes: trackedNotes, bassNote, velocity });
 
     // Update currentChordNotes to include all active voice notes (for display)
     this.currentChordNotes = Array.from(this.activeVoices.values()).flatMap(v => v.notes);
@@ -613,13 +626,14 @@ class AudioEngine {
 
     const now = toneModule.now();
 
-    // Release all notes from this voice
+    this.activeVoices.delete(noteIndex);
+    const remainingNotes = new Set(Array.from(this.activeVoices.values()).flatMap(v => v.notes));
+    // Chords can share tones; releasing one root must not cut another held chord short.
     voice.notes.forEach(note => {
+      if (remainingNotes.has(note)) return;
       this.synth?.triggerRelease(note, now);
       this.activeNotesModes.delete(note);
     });
-
-    this.activeVoices.delete(noteIndex);
 
     // Update arp sequence if in arp mode and there are still keys held
     if (this.state.performanceMode === 'arp' && this.activeVoices.size > 0) {
